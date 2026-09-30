@@ -23,7 +23,8 @@ Status legend: ⬜ todo · 🟨 in progress · ✅ done
 >    EXTRACT_MODEL, VALIDATE_MODEL, LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, LANGFUSE_HOST, RP_ID=localhost,
 >    RP_ORIGIN=http://localhost:5173, DB_PATH=data/dcta.db, NONCE_TTL_SECONDS=120,
 >    MANDATE_PER_TXN_MAX=1000.00, MANDATE_DAILY_MAX=3000.00). Write `.env.example` with placeholders.
-> 3. `.gitignore` for Python, Node, `.env`, `data/`, `*.pdf`.
+> 3. Extend the existing `.gitignore` (keep its current entries) with Python, Node, `data/` and `.venv/` rules.
+>    Do not touch `references/`.
 > 4. In `web/`: a Vite React TypeScript app with Tailwind configured, a single placeholder page titled
 >    "DCTA", and a Vite dev proxy: `/api/agent` → http://localhost:8001, `/api/gateway` → http://localhost:8002.
 > 5. A `Makefile` with targets: `test`, `lint`, `agent` (uvicorn agent app on 8001),
