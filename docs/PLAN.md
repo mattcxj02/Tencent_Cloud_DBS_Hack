@@ -174,7 +174,7 @@ Feasibility section.
 | Language | Python 3.12, `uv` for env/deps |
 | Agent graph | LangGraph (`StateGraph`, `interrupt`, SQLite checkpointer) |
 | Schemas | Pydantic v2 (also generates the JSON Schema for LLM structured output) |
-| LLM | **Tencent Hunyuan via TokenHub** (`https://tokenhub-intl.tencentcloudmaas.com/v1`, OpenAI-compatible, tool calling + structured output): `hy3` for extract, a *different* model (e.g. `hy4-preview` or DeepSeek on TokenHub) for the validator. Thin adapter ⇒ any OpenAI-compatible key works until the trial starts. |
+| LLM | **All via TokenHub** (`https://tokenhub-intl.tencentcloudmaas.com/v1`, OpenAI-compatible, tool calling + structured output). **Extractor: `hy3`** (Tencent Hunyuan). **Validator: DeepSeek-V4-Flash**: a different vendor, so errors are less correlated (a genuine "dual engine"). `hy4-preview` kept as an A/B option. Budget: ~1M free tokens ≈ 250 conversation turns ⇒ day-to-day dev and eval iterations run on the **personal DeepSeek key**; TokenHub is used for integration, final eval, video and Demo Day. Model IDs are env config (`EXTRACT_MODEL`, `VALIDATE_MODEL`, `LLM_BASE_URL`). |
 | API | FastAPI: `agent` app and `gateway` app as **two processes** (+ `ledger` module owned by gateway) |
 | Biometrics | `py_webauthn` + small vanilla JS |
 | Frontend | Server-rendered Jinja + HTMX + a little JS (mic, WebAuthn). Mobile-first. No React build chain. |
@@ -255,8 +255,7 @@ mandate enforcement, validator, audit chain, injection demo.
 
 ## 12. Open decisions
 
-1. **Before the Tencent trial (5 Oct):** do you have *any* OpenAI-compatible key (OpenAI, DeepSeek, etc.) for
-   P2 development, or should P2 slip to start on 5 Oct?
+1. ~~LLM key before trial~~ **Resolved:** TokenHub free tokens (hy3 + DeepSeek-V4-Flash) + personal DeepSeek key for dev.
 2. **Langfuse Cloud free tier** OK (mock data leaves your machine), or self-host (~2 h extra, needs Docker)?
 3. Does **Docker Desktop** exist on your Mac (needed only for self-hosted Langfuse / deploy)?
 4. **Default mandate values:** per-txn S$1,000 / daily S$3,000 OK for the demo?
