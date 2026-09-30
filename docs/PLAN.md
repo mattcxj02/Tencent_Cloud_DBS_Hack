@@ -1,6 +1,6 @@
 # DBS Track — DCTA Hackathon Plan (DRAFT v0.2)
 
-> Status: **draft for review** · local only, not pushed.
+> Status: **v0.2 agreed** · local only, not pushed.
 > Solo entrant · Banking track (DBS) · *Direct Conversational Transaction Agent (DCTA)* · **Scenario 1** (voice payments + KYC + basic risk control)
 > Submission **16 Oct 2026** · Finalists 23 Oct · Demo Day 3 Nov (TBC)
 > Budget: ~3–4 h/day × 16 days ≈ **55 h**. Stack: **Python**.
@@ -177,7 +177,7 @@ Feasibility section.
 | LLM | **All via TokenHub** (`https://tokenhub-intl.tencentcloudmaas.com/v1`, OpenAI-compatible, tool calling + structured output). **Extractor: `hy3`** (Tencent Hunyuan). **Validator: DeepSeek-V4-Flash**: a different vendor, so errors are less correlated (a genuine "dual engine"). `hy4-preview` kept as an A/B option. Budget: ~1M free tokens ≈ 250 conversation turns ⇒ day-to-day dev and eval iterations run on the **personal DeepSeek key**; TokenHub is used for integration, final eval, video and Demo Day. Model IDs are env config (`EXTRACT_MODEL`, `VALIDATE_MODEL`, `LLM_BASE_URL`). |
 | API | FastAPI: `agent` app and `gateway` app as **two processes** (+ `ledger` module owned by gateway) |
 | Biometrics | `py_webauthn` + small vanilla JS |
-| Frontend | Server-rendered Jinja + HTMX + a little JS (mic, WebAuthn). Mobile-first. No React build chain. |
+| Frontend | **React** (Vite + TypeScript + Tailwind), mobile-first PWA-style; `@simplewebauthn/browser` for biometrics; Web Speech API for the mic. Talks to the FastAPI apps over JSON only; the UI never computes hashes itself for trust (the gateway recomputes). Dev: Vite proxy on `localhost` so WebAuthn works without HTTPS. |
 | DB | SQLite (ledger, mandate, audit chain, nonces) |
 | Tracing | Langfuse SDK v3 (+ Tencent APM OTLP exporter later) |
 | Voice | Web Speech API → Tencent ASR |
@@ -190,7 +190,7 @@ agent/        graph.py, nodes/, llm.py, firewall.py, numparse.py, prompts/
 gateway/      app.py, verify.py, policy.py (mandate/KYC/velocity/scam), execute.py
 ledger/       models.py, seed.py
 shared/       schemas.py (Draft, Leg, Mandate…), canonical.py, audit.py, skills.py (registry)
-web/          templates/, static/ (mic.js, webauthn.js)
+web/          React app (Vite + TS + Tailwind): chat, mic, overlay, audit viewer, mandate settings
 evals/        golden.jsonl, run_eval.py
 tests/
 docs/         PLAN.md, architecture.png
@@ -231,14 +231,14 @@ CODEBUDDY.md  project rules for every CodeBuddy session
 | 2–4 Oct | 10 | **P1 Deterministic core** | schemas, canonical JSON, audit chain, ledger + seed, skill registry, gateway (WebAuthn verify, nonce, mandate, execute) + attack tests. *No LLM needed.* |
 | 5 Oct | — | **Start Tencent trial** | 1 month ⇒ covers Demo Day 3 Nov. Get TokenHub key (+ ASR later). |
 | 5–8 Oct | 13 | **P2 Agent graph** | LangGraph nodes 1–10, number parser, resolver, clarify loop, extractor + validator prompts, firewall, Langfuse tracing. |
-| 9–10 Oct | 7 | **P3 UI + biometrics** | chat + mic + text, overlay, WebAuthn signing, clarification chips, audit viewer. |
-| 11–12 Oct | 7 | **P4 Risk + demo features** | step-up mock, scam signals, mandate settings + cooling, Rogue Agent Mode, Tencent ASR. |
+| 9–11 Oct | 11 | **P3 React UI + biometrics** | chat + mic + text, overlay, WebAuthn signing, clarification chips, audit viewer, mandate settings screen. (Scaffold on 1 Oct in P0 so the UI grows alongside P1–P2.) |
+| 12 Oct | 4 | **P4 Risk + demo features** | step-up mock, scam signals, mandate cooling, Rogue Agent Mode; Tencent ASR if time allows. |
 | 13 Oct | 4 | **P5 Eval + deploy** | golden-set run, results table; Lighthouse HTTPS deploy (or local + video). Tencent APM exporter. |
 | 14–15 Oct | 7 | **P6 Submission** | description, architecture diagram, Miora cover, 5–8 min video, CodeBuddy screenshots. |
 | 16 Oct | 2 | Buffer + submit | submit early. |
 
-**Cut-line (drop in this order):** Tencent APM exporter → TTS → Tencent ASR (keep browser speech) → scam
-signals (keep mandate) → deploy (local + video). **Never cut:** WebAuthn signing, gateway verification,
+**Cut-line (drop in this order):** Tencent APM exporter → TTS → Tencent ASR (keep browser speech) → UI polish
+(animations, dark mode) → scam signals (keep mandate) → deploy (local + video). **Never cut:** WebAuthn signing, gateway verification,
 mandate enforcement, validator, audit chain, injection demo.
 
 ---
@@ -256,7 +256,7 @@ mandate enforcement, validator, audit chain, injection demo.
 ## 12. Open decisions
 
 1. ~~LLM key before trial~~ **Resolved:** TokenHub free tokens (hy3 + DeepSeek-V4-Flash) + personal DeepSeek key for dev.
-2. **Langfuse Cloud free tier** OK (mock data leaves your machine), or self-host (~2 h extra, needs Docker)?
-3. Does **Docker Desktop** exist on your Mac (needed only for self-hosted Langfuse / deploy)?
-4. **Default mandate values:** per-txn S$1,000 / daily S$3,000 OK for the demo?
-5. Is the **HTMX front end** OK, or do you want React for a more polished mobile look (costs ~4–6 h)?
+2. ~~Tracing~~ **Resolved:** Langfuse Cloud free tier.
+3. ~~Docker~~ **Resolved:** Docker Desktop installed (needed for deploy only).
+4. ~~Mandate values~~ **Resolved:** S$1,000 / S$3,000 as seed defaults, configurable (env + settings screen).
+5. ~~Front end~~ **Resolved:** React (Vite + TS + Tailwind). Costs ~5 h vs HTMX; absorbed from P4.
