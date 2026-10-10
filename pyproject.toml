@@ -1,0 +1,73 @@
+[project]
+name = "dcta"
+version = "0.3.0"
+description = "Direct Conversational Transaction Agent — DBS track hackathon"
+requires-python = ">=3.12,<3.13"
+readme = "README.md"
+license = { text = "Proprietary" }
+authors = [{ name = "DCTA" }]
+
+dependencies = [
+    # Web framework
+    "fastapi>=0.143,<0.144",
+    "uvicorn[standard]>=0.54,<0.55",
+    # Settings / validation
+    "pydantic>=2.14,<3",
+    "pydantic-settings>=2.15,<3",
+    # Graph orchestration
+    "langgraph>=1.2,<2",
+    # OpenAI-compatible LLM client (TokenHub)
+    "openai>=3.26,<4",
+    # WebAuthn server library
+    "webauthn>=3.0,<4",
+    # Observability
+    "langfuse>=4.17,<5",
+    # Imported directly by shared/telemetry (also pulled in by langfuse); pinned to the tested line.
+    "opentelemetry-sdk>=1.45,<2",
+    "opentelemetry-exporter-otlp-proto-http>=1.45,<2",
+    # HTTP / crypto utilities
+    "httpx>=0.28.1,<0.29",
+    "cryptography>=50,<51",
+    # Multipart form parsing (audio upload in conv_routes)
+    "python-multipart>=0.0.20,<0.1",
+    # TRTC ASR (gateway only)
+    "trtc-asr==2.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=9.1,<10",
+    "pytest-asyncio>=1.4,<2",
+    "ruff>=0.16,<0.17",
+    "httpx>=0.28.1,<0.29",  # also used for TestClient
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["agent", "validator", "gateway", "ledger", "shared"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["agent", "validator", "gateway", "ledger", "shared", "tests", "evals"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["agent", "validator", "gateway", "ledger", "shared"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["B011"]
+"gateway/conv_routes.py" = ["B008"]  # File(...) default is the standard FastAPI upload pattern
+
+[tool.uv.sources]
+# Official Tencent-RTC SDK; not published on PyPI despite its README. Pinned to a release tag.
+trtc-asr = { git = "https://github.com/Tencent-RTC/trtc-asr-sdk-python", tag = "v2.0.0" }

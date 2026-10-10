@@ -1,53 +1,70 @@
-# CODEBUDDY.md: Project rules (read before every task)
+# CODEBUDDY.md — DCTA project rules
 
-Project: **DCTA**, a Direct Conversational Transaction Agent for the DBS track of the Tencent Cloud hackathon.
-Users speak or type banking requests; an AI agent turns them into **drafts**; the user signs with biometrics;
-a separate deterministic **gateway** executes. Full plan: `docs/PLAN.md`. Task list: `docs/instructions.md`.
+Project: DBS track, Scenario 1, Direct Conversational Transaction Agent. Read `docs/PLAN.md`, `docs/ARCHITECTURE.md` and `docs/instructions.md`. v0.3 retains the full MVP at the user's request. **Langfuse is a required real observability backend**, not an optional exporter or console-log substitute. All implementation tasks remain pending until their checks actually pass.
 
-## Golden rule
-**GenAI is a generator of drafts, never an executor of funds.** The LLM is used in exactly two places
-(`agent/nodes/extract.py`, `agent/nodes/validate.py`). Everything else is deterministic Python.
+**Scope and authority**
 
-## Invariants (never violate; each has a test)
-- **I1** Code under `agent/` must never import from `gateway/` or `ledger/`, and never write to the ledger DB.
-  `EXECUTE` skills exist only in `gateway/`.
-- **I2** The gateway executes only payloads whose hash was the challenge of a user-verified WebAuthn assertion.
-- **I3** The confirmation overlay is rendered from the same canonical bytes that are hashed. Never from LLM text.
-- **I4** Nonces are single-use and expire after 120 s.
-- **I5** No execution may exceed the active Agent Mandate without a completed step-up.
-- **I6** Every workflow step appends to the hash-chained audit log (`shared/audit.py`).
-- **I7** A value with provenance `untrusted_text` can never populate `payee`/`amount` fields.
+Keep SGD transfers (own account/saved payee/saved PayNow), bill payments, card payments, mock SGX equities, 1–4-leg bundles, dependencies, voice/text, clarification/corrections, WebAuthn, mandates/cooling/pause, KYC/risk/scam controls, simulated secondary approval, audit/evidence UI and evaluations. Tencent APM, TTS and public hosting are optional. `docs/PLAN_REVIEW.md` contains recommendations, including scope cuts the user has not adopted. Do not implement those cuts or silently replace real WebAuthn with a mock. Report schedule/integration blockers honestly.
 
-## Stack
-- Python 3.12, managed with **uv** (`uv add`, `uv run`). FastAPI, Pydantic v2, LangGraph, py_webauthn,
-  SQLite (stdlib `sqlite3` or SQLAlchemy Core, no heavy ORM magic), pytest, ruff.
-- Frontend: `web/`: React + Vite + TypeScript + Tailwind, `@simplewebauthn/browser`.
-- LLM: OpenAI-compatible client pointed at Tencent TokenHub (`LLM_BASE_URL`, `LLM_API_KEY`,
-  `EXTRACT_MODEL=hy3`, `VALIDATE_MODEL=deepseek-v4-flash`). Never hard-code keys; read from `.env`.
-- Tracing: Langfuse Python SDK v3 (`@observe`). Audit log is separate and is the source of truth.
+GenAI generates drafts and fallible semantic assessments; it never authorizes funds. Model calls exist only in agent extraction and the separate read-only validator. The workflow is fixed by code; models do not select tools. Treat either or both models returning a malicious MATCH as an expected test condition. Never describe a prompt as injection-proof or a model result as a signature.
 
-## Layout
+**Invariants — enforce with meaningful checks**
+
+- I1: agent and validator have no ledger mount/write access, execution dispatcher or signing credentials. Forbid imports of gateway/ledger in both; check transitive shared-code boundaries and actual runtime permissions.
+- I2: execution requires valid user approval bound to the exact gateway-stored signing envelope, operation and authenticated owner. Verify source ownership and credential/session binding, not just signature validity.
+- I3: confirmation renders that same gateway envelope. Edits create a new revision and supersede validation and approval.
+- I4: approvals and secondary proofs are fresh/single-use. Concurrent/repeated requests cause at most one commit; committed retries return the stored receipt.
+- I5: hard mandate, KYC, sanctions, ownership, funds and velocity blocks cannot be overridden by model output or secondary approval. Keep old mandate active during cooling; decreases/pauses cancel pending increases.
+- I6: required audit events commit with financial effects. Workflow stages have correlated Langfuse observations; live backend traces/experiments are required acceptance evidence.
+- I7: trusted code assigns source lineage and preserves derived dependencies/taint. Untrusted references cannot become critical fields via relabeling; valid span references do not prove semantic correctness.
+- I8: semantic uncertainty, errors and malformed output prevent approval. The agent cannot supply its own verdict. Even a validator forced to MATCH cannot bypass I1–I5.
+- I9: ordered mock bundles are all-or-nothing. Approved equity quantities, price constraints and debit remain fixed; expiry/changes require a new draft and approval.
+
+**Contracts**
+
+Use `SHA256(b"DCTA:approval:v1\x00" + canonical_bytes(SigningEnvelope))` in one shared helper for both challenge issuance and verification. Envelope contains schema version, operation, user/credential, operation ID, frozen full payload, conversation binding where applicable, active mandate version, nonce and timestamps. Gateway stores the bytes; execute accepts authorization ID, expected hash and assertion, never a replacement payment payload. Use distinct execute_bundle/update_mandate operations. TTL <=120 seconds and no later than quote expiry.
+
+Gateway captures original authenticated conversation turns and corrections; agent credentials cannot fabricate user turns. Gateway invokes validator directly with full ordered history, frozen bundle and bank mappings. Exclude extractor reasoning. Validator prompt/model/schema are backend-controlled, versioned and recorded; never accept system instructions from client fields or expose secrets in prompts. Bind results to bundle/conversation hashes and revisions. No live runtime bypass flags for tests.
+
+Execution and secondary approval use the state machine in ARCHITECTURE. Atomically recheck policy/state and commit effects, nonce/proof consumption, counters, receipt and audit. Recheck immediately after step-up as well. Idempotency uses user+operation+operation ID with immutable payload hash. Validation is required for conversational bundles; direct signed mandate settings use deterministic validation. Invalid signatures never become approvals.
+
+**Stack, files and permissions**
+
+Python 3.12/uv; FastAPI, Pydantic/settings, LangGraph, provider-compatible client, webauthn, Langfuse, httpx, cryptography; pytest/ruff. SQLite belongs to gateway. React/Vite/TypeScript/Tailwind and SimpleWebAuthn browser helper. Pin tested SDK versions; the prior Langfuse v3 assumption is superseded by current official docs. Check account-level model/ASR/backend access instead of assuming trial credits.
+
 ```
-agent/     LangGraph workflow (nodes/, graph.py, llm.py, firewall.py, numparse.py, prompts/)
-gateway/   FastAPI app: identity (WebAuthn), challenge, verify, policy (mandate/KYC/velocity/scam), execute
-ledger/    mock core bank: models, seed data (SGD only)
-shared/    schemas.py, canonical.py, audit.py, skills.py (registry), config.py
-web/       React app
-evals/     golden.jsonl, run_eval.py
-tests/     pytest (unit + invariant + attack tests)
-docs/      PLAN.md, instructions.md, devlog/
+agent/        fixed workflow, extraction and READ/DRAFT API clients
+validator/    internal semantic audit service without payment tools
+gateway/      identity, captured conversation, frozen drafts, validation coordinator,
+              policy/mandates, approval/step-up, execution and audit
+ledger/       gateway-only mock bank models and seed
+shared/       pure types/canonicalization, safe telemetry and scoped HTTP clients
+prompts/      version-controlled instructions
+web/          chat/audio, confirmation, mandate settings, evidence viewer
+infra/        isolated service images/Compose
+evals/        versioned datasets, Langfuse experiment runner and reports
+tests/        contracts, model fixtures, gateway, isolation, lifecycle and attacks
 ```
 
-## Coding conventions
-- Money is **`decimal.Decimal`**, never float. Serialise as a string with exactly 2 dp (`"50.00"`).
-- All timestamps are timezone-aware UTC ISO-8601 (`...Z`).
-- Every public function has type hints; Pydantic models for anything crossing a module or HTTP boundary.
-- Keep functions small and pure where possible; side effects (DB, network) at the edges.
-- Every new behaviour gets a pytest test. Run `uv run pytest -q` and `uv run ruff check .` before finishing.
-- Do not add dependencies beyond the stack above without saying why in your final message.
-- Do not run `git commit`, `git push` or modify git config: the reviewer commits.
-- Do not create or edit `.env`; update `.env.example` instead.
-- Beginner-readable code: clear names, short docstrings explaining *why*, no clever one-liners.
+Only gateway has the ledger/evidence mount and identity/secondary-approval secrets. Agent/validator receive narrowly scoped service credentials and their own model keys. Internal routes check service scope and owner/session binding. Shared utilities must not smuggle execution capabilities across the boundary. Never mount a Docker socket or full host workspace into the agent runtime.
 
-## Finishing a task
-End with: files changed, commands run, test results, and anything left undone or uncertain.
+**Langfuse and audit handling**
+
+Use a configured Langfuse project with real generation/workflow traces and evaluation experiments. No-op exporters are test fixtures only. Share trace context across services, link resumed turns through pseudonymous session/revision IDs, and persist trace IDs in audit. Log prompt version/hash, model, safe input/output, latency and available usage/cost; missing cost is unavailable, not zero. Do not leave spans open during human waiting.
+
+Allowlist/redact before export, including errors. Never send API keys, auth headers/cookies, OTPs, assertions, private keys, raw audio or full account IDs to Langfuse. Disable indiscriminate argument capture. Keep raw evidence access-controlled locally and use synthetic model-visible banking data. Langfuse outage must show degraded health and bounded export retry without changing authorization or re-executing payments. Local mandatory audit failure blocks commit. Do not claim the local hash chain is regulatory-grade or protected against a privileged complete rewrite.
+
+**Implementation discipline**
+
+- Decimal for money; serialize two-decimal strings. SQLite integer minor units or validated decimal strings, never REAL. Reject float/non-finite values and unsupported precision.
+- UTC timestamps in storage/signing; Asia/Singapore calendar days for daily policy.
+- Pydantic schemas at HTTP/model boundaries; type hints; small readable functions. No arbitrary expression evaluation, model HTML or model-selected tools.
+- Schema-valid model output can still be false. Semantic checks and deterministic authorization are tested/reported separately.
+- Tests cover meaningful financial, authorization, lifecycle and privacy behavior. Documentation-only changes use consistency/link checks; do not invent a test run when no app exists.
+- For code changes run relevant tests, `uv run ruff check .` and frontend build when affected. Run required integration checks and report unavailable live credentials separately from passing local tests.
+- Every project folder has a `README.md` stating its purpose, its files and its trust boundary. When you add, rename or change the role of a module or folder, update that folder's README in the same task.
+- Do not add dependencies without explaining their purpose. Consult installed versions/current official docs when implementing SDK integration.
+- Never create/edit `.env`, print credentials, modify references, commit, push or modify git configuration. Update `.env.example` with placeholders. Publishing/submitting requires the user's instruction.
+- Use CodeBuddy for meaningful tasks and capture at least three sanitized development screenshots/recordings. Do not fabricate tool-usage evidence, metrics or completed task status.
+
+Finish with files changed, checks and results, and unfinished work or limitations. Scope reductions in the review remain optional until explicitly adopted by the user.

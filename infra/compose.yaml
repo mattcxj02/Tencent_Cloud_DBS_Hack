@@ -1,0 +1,169 @@
+# DCTA Compose — T-04 runtime isolation
+#
+# Run from repo root:
+#   docker compose -f infra/compose.yaml --project-directory . up -d
+# or:
+#   make compose-up
+#
+# Networks:
+#   agent_net     — gateway + agent (agent can reach gateway, NOT validator)
+#   validator_net — gateway + validator (validator can reach gateway, NOT agent)
+#
+# Neither network is marked `internal` so both have outbound internet for LLM APIs.
+# Egress choice documented in docs/evidence/T-04-isolation.txt.
+
+name: dcta
+
+services:
+  # ── Gateway ──────────────────────────────────────────────────────
+  gateway:
+    build:
+      context: .
+      dockerfile: infra/Dockerfile
+      target: gateway
+    image: dcta-gateway:latest
+    ports:
+      - "127.0.0.1:8002:8002"
+    volumes:
+      - gateway_data:/data
+    environment:
+      - DCTA_DB_PATH=/data/dcta.db
+      - VALIDATOR_BASE_URL=http://validator:8003
+      - AGENT_BASE_URL=http://agent:8001
+      - GATEWAY_DELEGATION_SECRET=${GATEWAY_DELEGATION_SECRET:-}
+      - OPERATOR_TOKEN=${OPERATOR_TOKEN:-}
+      - STEP_UP_SECRET=${STEP_UP_SECRET:-}
+      # Shared secret for gateway -> validator calls (T-10). Gateway and validator only.
+      - VALIDATOR_SERVICE_TOKEN=${VALIDATOR_SERVICE_TOKEN:-}
+      - SDKAppID=${SDKAppID:-}
+      - SDKSecretKey=${SDKSecretKey:-}
+      - TRTC_ASR_HOST=${TRTC_ASR_HOST:-asr-intl.cloud-rtc.com}
+      - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY:-}
+      - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY:-}
+      - LANGFUSE_BASE_URL=${LANGFUSE_BASE_URL:-}
+      - WEBAUTHN_RP_ID=${WEBAUTHN_RP_ID:-localhost}
+      - WEBAUTHN_RP_ORIGIN=${WEBAUTHN_RP_ORIGIN:-http://localhost:5173}
+      - NONCE_TTL_SECONDS=${NONCE_TTL_SECONDS:-120}
+      - MANDATE_PER_LEG=${MANDATE_PER_LEG:-1000.00}
+      - MANDATE_DAILY=${MANDATE_DAILY:-3000.00}
+      - RISK_THRESHOLD=${RISK_THRESHOLD:-500.00}
+      - COOLING_HOURS=${COOLING_HOURS:-12}
+      - DCTA_TIMEZONE=${DCTA_TIMEZONE:-Asia/Singapore}
+    networks:
+      - agent_net
+      - validator_net
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    # Gateway needs a writable /data volume, so read_only is not set here.
+    # The volume is the only writable path; the root filesystem is still
+    # not writable by the service user.
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8002/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        python -c "
+        from ledger.schema import connect, init_db
+        from ledger.seed import seed_db
+        conn = connect('/data/dcta.db')
+        init_db(conn)
+        seed_db(conn)
+        conn.close()
+        print('ledger initialized and seeded')
+        " && exec uvicorn gateway.app:app --host 0.0.0.0 --port 8002
+    restart: unless-stopped
+
+  # ── Agent ────────────────────────────────────────────────────────
+  agent:
+    build:
+      context: .
+      dockerfile: infra/Dockerfile
+      target: agent
+    image: dcta-agent:latest
+    # NOT published to host
+    environment:
+      - EXTRACT_PROVIDER=${EXTRACT_PROVIDER:-tokenhub}
+      - EXTRACT_MODEL=${EXTRACT_MODEL:-hy3}
+      - EXTRACT_MAX_TOKENS=${EXTRACT_MAX_TOKENS:-4096}
+      # Least privilege: only the key for EXTRACT_PROVIDER (tokenhub). If you change
+      # the provider, swap this line for deepseek_key.
+      - tokenhub_key=${tokenhub_key:-}
+      - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY:-}
+      - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY:-}
+      - LANGFUSE_BASE_URL=${LANGFUSE_BASE_URL:-}
+      - GATEWAY_BASE_URL=http://gateway:8002
+    networks:
+      - agent_net
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m
+    # No volumes, no bind mounts, no Docker socket
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    command: ["uvicorn", "agent.app:app", "--host", "0.0.0.0", "--port", "8001"]
+    depends_on:
+      gateway:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ── Validator ────────────────────────────────────────────────────
+  validator:
+    build:
+      context: .
+      dockerfile: infra/Dockerfile
+      target: validator
+    image: dcta-validator:latest
+    # NOT published to host
+    environment:
+      - VALIDATE_PROVIDER=${VALIDATE_PROVIDER:-deepseek}
+      - VALIDATE_MODEL=${VALIDATE_MODEL:-deepseek-flash}
+      - VALIDATE_MAX_TOKENS=${VALIDATE_MAX_TOKENS:-2048}
+      # Least privilege: only the key for VALIDATE_PROVIDER (deepseek). If you change
+      # the provider, swap this line for tokenhub_key.
+      - deepseek_key=${deepseek_key:-}
+      - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY:-}
+      - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY:-}
+      - LANGFUSE_BASE_URL=${LANGFUSE_BASE_URL:-}
+      # Without it (>= 32 chars) the validator refuses every validation request.
+      - VALIDATOR_SERVICE_TOKEN=${VALIDATOR_SERVICE_TOKEN:-}
+    networks:
+      - validator_net
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m
+    # No volumes, no bind mounts, no Docker socket
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8003/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    command: ["uvicorn", "validator.app:app", "--host", "0.0.0.0", "--port", "8003"]
+    depends_on:
+      gateway:
+        condition: service_healthy
+    restart: unless-stopped
+
+networks:
+  agent_net:
+    driver: bridge
+    # NOT internal — agent needs outbound internet for LLM API calls
+  validator_net:
+    driver: bridge
+    # NOT internal — validator needs outbound internet for LLM API calls
+
+volumes:
+  gateway_data:
+    driver: local

@@ -1,0 +1,37 @@
+.env
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.ruff_cache/
+.pytest_cache/
+*.egg-info/
+
+# Data / databases
+data/
+recordings/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Node / frontend
+web/node_modules/
+web/dist/
+node_modules/
+dist/
+
+# Generated smoke audio
+*.smoke.wav
+smoke_*.wav
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+*.tsbuildinfo

@@ -1,0 +1,137 @@
+=== T-04 Isolation Probe ===
+Started: 2026-10-10T02:39:01Z
+
+--- AGENT PROBE ---
+
+========================================================================
+T-04 Isolation Probe — service=agent — pid=25 uid=10002
+Gateway host: gateway:8002
+========================================================================
+
+--- Ledger file access ---
+PASS  open /data/dcta.db for read  expected=denied  observed=FileNotFoundError: [Errno 2] No such file or directory: '/data/dcta.db'
+PASS  open /data/dcta.db for write  expected=denied  observed=FileNotFoundError: [Errno 2] No such file or directory: '/data/dcta.db'
+PASS  no *.db files in container  expected=success  observed=no db files found
+
+--- Import gateway/ledger ---
+PASS  import gateway  expected=denied  observed=ModuleNotFoundError: No module named 'gateway'
+PASS  import ledger  expected=denied  observed=ModuleNotFoundError: No module named 'ledger'
+PASS  import gateway.app  expected=denied  observed=ModuleNotFoundError: No module named 'gateway'
+PASS  import ledger.schema  expected=denied  observed=ModuleNotFoundError: No module named 'ledger'
+
+--- Write protection ---
+PASS  write to /app/agent  expected=denied  observed=OSError: [Errno 30] Read-only file system: '/app/agent/.isolation_probe_write_test'
+PASS  write to /app/shared  expected=denied  observed=OSError: [Errno 30] Read-only file system: '/app/shared/.isolation_probe_write_test'
+PASS  write to /app/prompts  expected=denied  observed=OSError: [Errno 30] Read-only file system: '/app/prompts/.isolation_probe_write_test'
+PASS  write to /  expected=denied  observed=OSError: [Errno 30] Read-only file system: '/.isolation_probe_write_test'
+
+--- Docker socket ---
+PASS  docker.sock absent  expected=absent  observed=not found
+
+--- No host workspace mount ---
+PASS  no host pyproject.toml  expected=absent  observed=not at /pyproject.toml
+PASS  no host .git  expected=absent  observed=not at /.git
+PASS  no /workspace mount  expected=absent  observed=not at /workspace
+PASS  no pyproject.toml in image  expected=absent  observed=not at /app/pyproject.toml
+
+--- No gateway secrets in env ---
+PASS  no gateway secrets in env  expected=none of ['SDKSecretKey', 'GATEWAY_DELEGATION_SECRET', 'SDKAppID', 'WEBAUTHN_RP_ID', 'WEBAUTHN_RP_ORIGIN', 'DCTA_DB_PATH', 'MANDATE_PER_LEG', 'MANDATE_DAILY', 'RISK_THRESHOLD', 'COOLING_HOURS', 'NONCE_TTL_SECONDS', 'DCTA_TIMEZONE']  observed=none found
+
+--- Gateway HTTP denial (401) ---
+PASS  GET /internal/bank/accounts no token  expected=401  observed=401
+PASS  GET /internal/bank/accounts malformed token  expected=401  observed=401
+PASS  GET /internal/bank/accounts forged token  expected=401  observed=401
+PASS  POST /api/conversations/.../text fabricated turn  expected=401  observed=401
+PASS  POST /internal/audit/agent-events no token  expected=401  observed=401
+
+--- Cross-service connectivity ---
+PASS  agent→validator:8003  expected=unreachable  observed=gaierror: [Errno -2] Name or service not known
+
+--- Gateway /health reachable ---
+PASS  gateway /health reachable  expected=200  observed=200
+
+--- Process UID ---
+PASS  process UID  expected=10002  observed=uid=10002
+
+--- Own /health ---
+PASS  own /health  expected=200  observed=200
+
+========================================================================
+SUMMARY: 26 PASS, 0 FAIL, 0 SKIP (total 26)
+========================================================================
+
+
+--- VALIDATOR PROBE ---
+
+========================================================================
+T-04 Isolation Probe — service=validator — pid=24 uid=10003
+Gateway host: gateway:8002
+========================================================================
+
+--- Ledger file access ---
+PASS  open /data/dcta.db for read  expected=denied  observed=FileNotFoundError: [Errno 2] No such file or directory: '/data/dcta.db'
+PASS  open /data/dcta.db for write  expected=denied  observed=FileNotFoundError: [Errno 2] No such file or directory: '/data/dcta.db'
+PASS  no *.db files in container  expected=success  observed=no db files found
+
+--- Import gateway/ledger ---
+PASS  import gateway  expected=denied  observed=ModuleNotFoundError: No module named 'gateway'
+PASS  import ledger  expected=denied  observed=ModuleNotFoundError: No module named 'ledger'
+PASS  import gateway.app  expected=denied  observed=ModuleNotFoundError: No module named 'gateway'
+PASS  import ledger.schema  expected=denied  observed=ModuleNotFoundError: No module named 'ledger'
+
+--- Write protection ---
+PASS  write to /app/validator  expected=denied  observed=OSError: [Errno 30] Read-only file system: '/app/validator/.isolation_probe_write_test'
+PASS  write to /app/shared  expected=denied  observed=OSError: [Errno 30] Read-only file system: '/app/shared/.isolation_probe_write_test'
+PASS  write to /app/prompts  expected=denied  observed=OSError: [Errno 30] Read-only file system: '/app/prompts/.isolation_probe_write_test'
+PASS  write to /  expected=denied  observed=OSError: [Errno 30] Read-only file system: '/.isolation_probe_write_test'
+
+--- Docker socket ---
+PASS  docker.sock absent  expected=absent  observed=not found
+
+--- No host workspace mount ---
+PASS  no host pyproject.toml  expected=absent  observed=not at /pyproject.toml
+PASS  no host .git  expected=absent  observed=not at /.git
+PASS  no /workspace mount  expected=absent  observed=not at /workspace
+PASS  no pyproject.toml in image  expected=absent  observed=not at /app/pyproject.toml
+
+--- No gateway secrets in env ---
+PASS  no gateway secrets in env  expected=none of ['SDKSecretKey', 'GATEWAY_DELEGATION_SECRET', 'SDKAppID', 'WEBAUTHN_RP_ID', 'WEBAUTHN_RP_ORIGIN', 'DCTA_DB_PATH', 'MANDATE_PER_LEG', 'MANDATE_DAILY', 'RISK_THRESHOLD', 'COOLING_HOURS', 'NONCE_TTL_SECONDS', 'DCTA_TIMEZONE']  observed=none found
+
+--- Gateway HTTP denial (401) ---
+PASS  GET /internal/bank/accounts no token  expected=401  observed=401
+PASS  GET /internal/bank/accounts malformed token  expected=401  observed=401
+PASS  GET /internal/bank/accounts forged token  expected=401  observed=401
+PASS  POST /api/conversations/.../text fabricated turn  expected=401  observed=401
+PASS  POST /internal/audit/agent-events no token  expected=401  observed=401
+
+--- Cross-service connectivity ---
+PASS  validator→agent:8001  expected=unreachable  observed=gaierror: [Errno -2] Name or service not known
+
+--- Gateway /health reachable ---
+PASS  gateway /health reachable  expected=200  observed=200
+
+--- Process UID ---
+PASS  process UID  expected=10003  observed=uid=10003
+
+--- Own /health ---
+PASS  own /health  expected=200  observed=200
+
+========================================================================
+SUMMARY: 26 PASS, 0 FAIL, 0 SKIP (total 26)
+========================================================================
+
+
+--- .ENV ABSENT PROOF ---
+agent image:
+(expected: empty)
+validator image:
+(expected: empty)
+gateway image:
+(expected: empty)
+
+Image sizes:
+dcta-agent       latest    355MB
+dcta-gateway     latest    356MB
+dcta-validator   latest    355MB
+
+Finished: 2026-10-10T02:39:16Z

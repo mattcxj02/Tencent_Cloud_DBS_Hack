@@ -1,0 +1,28 @@
+# agent
+
+The drafting agent service (FastAPI, port 8001, internal only). It turns a stored conversation into an **untrusted** draft proposal or one clarifying question. It never validates, approves, signs or moves money.
+
+| File | Purpose |
+|---|---|
+| `app.py` | `GET /health`; `POST /internal/run` `{conversation_id}` with `Authorization: Bearer <delegation token>` → `clarify` / `draft_frozen` / `error` (+ `trace_id` when Langfuse is on) |
+| `workflow.py` | Fixed LangGraph graph, typed state (`AgentState`, `LegPlan`), normalization, bank resolution, proposal and gateway-rejection handling |
+| `extraction.py` | The only model call: strict output schema, injectable `ExtractorLLM`, OpenAI-compatible client (TokenHub `hy3`, JSON mode, reasoning ignored) |
+| `prompt.py` | Loads `prompts/extractor.md`; exposes its version and SHA-256 |
+| `turns.py` | Current turns (corrections applied in place, replaced originals dropped) and verbatim quote location → `{turn_id, start, end, text}` |
+| `names.py` | Matches user words to accounts, payees, billers, cards and SGX symbols; narrows a citation to words naming exactly one record |
+| `questions.py` | Code-written clarification questions (fixed text, the user's own words, gateway bank labels; never model text) |
+| `gateway_client.py` | Injectable HTTP client for the gateway: snapshot, bank reads, quote request, question, draft proposal, `agent.*` audit events |
+| `tracing.py` | Langfuse observations through T-08 `shared.telemetry`: `agent.run` span (continues the gateway's `traceparent`), one span per stage, `extractor` generation |
+
+**Workflow** (`ingest → extract → normalize → resolve → clarify | propose → result`; routing is code):
+
+- `ingest`: snapshot via the gateway; bounded to 40 turns / 8,000 characters, else `error CONTEXT_LIMIT_EXCEEDED` (no silent truncation).
+- `extract`: the model returns quoted words only (`action`, `amount_quote`, `recipient_quote`, `source_quote`, `reference_quote`, `relative_to_quote`, `unclear`). No IDs, offsets or display names. Empty, malformed or schema-invalid output → `error`, no proposal.
+- `normalize`: at most 4 legs, supported actions; every quote must be found verbatim (whole words, current user turns, never app questions) and never inside a reference or double-quoted text; amounts parsed by `shared/amounts.py`; "half of that" links to exactly one earlier leg, otherwise ask.
+- `resolve`: all candidates from the bank READ API; one candidate or ask. Strong names (full name, alias, suffix) beat a shared first name. Card balance uses the card's authoritative outstanding amount; equities get a fresh quote. The cited words are narrowed so they name only the resolved record ("John Doe" → "Doe").
+- `propose`: `POST /internal/drafts` with typed `amount_expr` and evidence spans. The gateway re-checks and freezes; evidence/ambiguity rejections become a question, `QUOTE_EXPIRED` re-quotes once, anything else is an `error`.
+- `clarify`: one short question via `POST /internal/conversations/{id}/questions`.
+
+Each stage reports a small `agent.*` audit event (best effort) carrying the Langfuse trace and span IDs. Langfuse gets one trace per run: stage spans with outcome/reason codes and an `extractor` generation with model, prompt version and SHA-256, the conversation data the model saw, the parsed quotes, usage and latency. The system prompt (identified by hash), reasoning tokens, the delegation token and headers are never exported; `shared.telemetry` redacts again before export. Telemetry failures never change the outcome.
+
+**Boundary (invariant I1):** may import `shared/` only, never `gateway/` or `ledger/` (`tests/test_isolation.py`). It reads the conversation and bank data over HTTP with the gateway's short-lived delegation token for one user and conversation, and can only propose drafts and questions and report `agent.*` events. Its container image contains no gateway or ledger code (see `infra/`). Tests: `tests/test_agent_workflow.py`, `tests/test_agent_units.py`, `tests/test_agent_telemetry.py`, `tests/test_agent_gateway_integration.py` (real gateway), `tests/test_amounts.py`; live extract smoke with a Langfuse trace: `scripts/smoke_extract.py`.

@@ -1,262 +1,173 @@
-# DBS Track — DCTA Hackathon Plan (DRAFT v0.2)
+# DBS Track — DCTA Hackathon Plan v0.3
 
-> Status: **v0.2 agreed** · local only, not pushed.
-> Solo entrant · Banking track (DBS) · *Direct Conversational Transaction Agent (DCTA)* · **Scenario 1** (voice payments + KYC + basic risk control)
-> Submission **16 Oct 2026** · Finalists 23 Oct · Demo Day 3 Nov (TBC)
-> Budget: ~3–4 h/day × 16 days ≈ **55 h**. Stack: **Python**.
+Status: revised 9 October 2026 following the plan review and validator discussion. Planning only; no application implementation is present in this checkout. The full MVP is retained at the user's request, and **Langfuse is required**. The optional scope reductions in `PLAN_REVIEW.md` are recommendations, not the build contract. Implementation tasks: `instructions.md`. Trust boundaries: `ARCHITECTURE.md`. Live progress and owner actions: `STATUS.md`.
 
-Changes from v0.1: Python stack; a **single agent built as a deterministic state machine** where the LLM is
-confined to two nodes; a typed **skill/tool registry** split by side-effect class; an explicit **Agent Mandate**
-(spending limits the agent can never exceed); **Langfuse + Tencent APM** for traces next to our own
-tamper-evident audit log; scope cut to fit 55 h.
+Solo entrant · DBS Banking track · Direct Conversational Transaction Agent · **Scenario 1: Voice-Enabled Payment and Transaction**, including KYC and basic risk control. Submission: **16 October 2026**; aim to submit on 15 October. Finalists: 23 October. Demo Day: 3 November, marked TBC in the handbook. Exact submission cutoff and DBS preliminary rubric must be checked through the participant channel.
 
----
+**Product outcome and scope**
 
-## 1. Design principle
+Help an authenticated retail customer complete several routine banking actions through one conversation, with understandable correction, explicit approval, and a verifiable receipt. Suggested nine-word blurb: “Speak your payments. Verify every detail. Stay in control.”
 
-> **"The LLM translates speech into slots. Code does everything else."**
-
-GenAI is used in exactly **two** places:
-1. **Extract:** transcript → untrusted slot values (`{"action":"transfer","payee_mention":"Ah Ma","amount_text":"fifty bucks"}`).
-2. **Validate:** an independent second call that sees *only* the raw transcript and the final draft, and says whether they match.
-
-Everything else is deterministic Python: number parsing, payee and account resolution, clarification questions
-(from templates), draft compilation, policy and limits, signing, execution and audit. The LLM never chooses
-which tool runs, never sees ledger credentials, and never produces text the user signs.
-
-Why this beats a free "ReAct" agent, for judges and for the brief:
-- **Deterministic execution:** the same transcript and state give the same path through the graph.
-- **Replayable:** any session can be re-run from the audit log.
-- **Explainable:** every step is a named node with typed input and output, and shows up in the trace.
-
----
-
-## 2. The single-agent workflow (state machine)
-
-Built with **LangGraph** (explicit `StateGraph`, checkpointing, `interrupt()` for human-in-the-loop). Each node
-is a plain Python function over one typed `SessionState` (Pydantic).
-
-```
- voice ─► [1 INGEST] ◄─ text
-             │  raw audio/text stored → audit
-             ▼
-       [2 FIREWALL]  deterministic: length/charset, injection patterns,
-             │        untrusted-text quarantine (bill refs, pasted text)
-             ▼
-       [3 EXTRACT] ★LLM  JSON-schema slots only, no tools, no execution
-             ▼
-       [4 NORMALISE]  deterministic number parser ("a grand", "fifty bucks",
-             │         "half of it") cross-checked against the LLM's value → mismatch ⇒ clarify
-             ▼
-       [5 RESOLVE]    READ skills: payee lookup (alias/fuzzy), accounts, holdings, quotes
-             │
-             ├── ambiguous / missing ──► [6 CLARIFY] ── interrupt() ─► user answer ─► back to 3
-             ▼
-       [7 COMPILE]    canonical draft JSON · $ref dependencies resolved · provenance tag per field
-             ▼
-       [8 VALIDATE] ★LLM  independent: transcript vs draft  + deterministic diff  → mismatch ⇒ FREEZE
-             ▼
-       [9 PRE-CHECK]  Agent Mandate · KYC tier · sanctions list · velocity · scam signals
-             │         → PASS | STEP-UP | BLOCK   (advisory; the gateway re-checks)
-             ▼
-      [10 CONFIRM]    interrupt(): deterministic overlay rendered from canonical bytes
-             │         → WebAuthn biometric signs  H = SHA256(canonical ‖ nonce ‖ expiry)
-             ▼
- ═══════════ trust boundary: agent process ends here ═══════════
-             ▼
-      [11 GATEWAY]    separate process · only holder of ledger credentials
-                      verify sig ▸ recompute hash ▸ nonce single-use ▸ expiry ▸
-                      re-check mandate/KYC/limits ▸ step-up if needed ▸ execute legs in order
-             ▼
-      [12 RESULT]     read back to the user; every node already wrote to the audit chain
-```
-
-### Skill / tool registry
-
-Every skill is a typed Python function (Pydantic in/out) tagged with a **side-effect class**. The registry
-enforces who may call what.
-
-| Class | Examples | Callable by agent graph? | Callable by gateway? |
-|---|---|---|---|
-| `READ` | `lookup_payee`, `list_accounts`, `get_balance`, `get_quote`, `get_history` | ✅ | ✅ |
-| `DRAFT` | `compile_draft`, `render_overlay`, `issue_nonce` | ✅ | — |
-| `EXECUTE` | `transfer`, `pay_bill`, `pay_card`, `buy_equity` | ❌ **not even imported** | ✅ after signature |
-
-`EXECUTE` skills live only in the `gateway` package. The `agent` package has no import path to them and no DB
-credential for ledger writes. This is enforced by a test that inspects imports, plus separate SQLite
-permissions/processes.
-
-Supported intents (keep it tight): `transfer` (own account / saved payee / PayNow), `pay_bill`, `pay_card`,
-`buy_equity` (SGX: D05 etc.). Currency: SGD only.
-
----
-
-## 3. Identity & biometrics
-
-- **Login / identity:** passkey (WebAuthn) sign-in → session. Enrollment is done once for the demo user.
-- **Every money movement:** a fresh WebAuthn assertion with `userVerification: "required"` (FaceID / TouchID /
-  Windows Hello). The WebAuthn **challenge is the transaction hash**, so the signature is bound to exact bytes
-  (the same idea as W3C *Secure Payment Confirmation* and PSD2 "dynamic linking").
-- One signature covers the whole ordered multi-leg bundle; each leg is shown separately on the overlay.
-- Library: `py_webauthn` (server) + ~40 lines of browser JS (`navigator.credentials.get`).
-- WYSIWYS: the overlay is rendered by code from the canonical JSON, never from LLM prose. The gateway
-  recomputes the hash from the bytes it receives; any tampering ⇒ reject.
-
----
-
-## 4. Agent Mandate: the money limit on what the agent can do
-
-A per-user, **biometrically signed policy** that defines the ceiling for anything initiated through the
-conversational channel. It is modelled on the *Intent Mandate* in Google's AP2 protocol, adapted to banking.
-
-```json
-{
-  "mandate_id": "m_001",
-  "per_txn_max": 1000.00,
-  "daily_max": 3000.00,
-  "allowed_actions": ["transfer", "pay_bill", "pay_card", "buy_equity"],
-  "payees": "saved_only",            // agent cannot draft to never-seen accounts
-  "max_legs_per_bundle": 4,
-  "valid_until": "2026-12-31T23:59:59+08:00"
-}
-```
-
-Rules (all enforced **in the gateway**, pre-checked in node 9 for UX):
-- Draft within mandate → normal biometric signature.
-- Draft above `per_txn_max` / `daily_max` or to a new payee → **step-up**: out-of-band confirmation (TOTP
-  mock or "relationship manager callback" mock) **plus** biometric.
-- **Raising the mandate** needs biometric + a **12 h cooling period** before it takes effect, like SG banks'
-  transfer-limit increases. This is the scam-resistant part: a scammer on the phone cannot talk the user into
-  "just raise the limit" and use it immediately.
-- **Lowering or pausing** ("kill switch") takes effect instantly.
-- Scam signals (deterministic): new payee + large amount + urgency or "safe account / officer / police"
-  language in the transcript ⇒ force step-up + cooling notice + offer to lock the funds.
-
----
-
-## 5. Input: speech + text
-
-- **Text box is always available.** Voice and text converge at node 1, so there is one pipeline.
-- **Voice, phase 1:** browser Web Speech API (zero setup, free) for development.
-- **Voice, phase 2:** **Tencent Cloud ASR** real-time WebSocket via the `tencentcloud-speech-sdk-python` backend
-  proxy (brief recommends it; multi-accent). Raw audio is kept for the audit trail, as the brief requires.
-- Optional: Tencent TTS read-back of the confirmation (accessibility), only if time permits.
-
----
-
-## 6. Traceability: two layers, different jobs
-
-| Layer | Purpose | Tool |
-|---|---|---|
-| **LLM/agent observability** | Debug & evaluate: every node as a span, prompts, outputs, tokens, latency, eval scores per dataset item | **Langfuse** (Python SDK v3 is OpenTelemetry-based; `@observe` decorator + LangGraph callback) |
-| **Tencent-native option** | Same OTel spans in Tencent's console | **Tencent Cloud APM → LLM Observability**: supports OpenAI SDK + LangChain/LangGraph via OTel (`tapm-instrument`) |
-| **Compliance audit (source of truth)** | Tamper-evident record: raw input → transcript → slots → draft → validation → signature → execution | **Own append-only, hash-chained table** in SQLite with a "Verify chain" button |
-
-Recommendation:
-- Start with **Langfuse Cloud free tier**. There's no infra, and self-hosting v3 means running Postgres + ClickHouse + Redis +
-  MinIO, which isn't worth your hours. Only mock data is sent.
-- Because both are OpenTelemetry, **add a second exporter to Tencent APM** once the Tencent trial is active.
-  That gives "we use Tencent's observability" for the scoring story at near-zero cost.
-- Langfuse is *not* the audit trail. The brief asks for a regulatory-grade record; that stays in our own
-  hash-chained log, and each audit row stores the Langfuse `trace_id` so they cross-link.
-
-Tencent ADP (Agent Development Platform, 4.0 intl) was considered: it has a visual workflow builder and
-AgentOps traces, but it's low-code, hosted, tied to the 1-month trial, and makes the crypto gateway and
-determinism claims harder to show in code. **Not used for the core**; mention it as the production path in the
-Feasibility section.
-
----
-
-## 7. Stack
-
-| Concern | Choice |
+| Capability | Required MVP behavior |
 |---|---|
-| Language | Python 3.12, `uv` for env/deps |
-| Agent graph | LangGraph (`StateGraph`, `interrupt`, SQLite checkpointer) |
-| Schemas | Pydantic v2 (also generates the JSON Schema for LLM structured output) |
-| LLM | **All via TokenHub** (`https://tokenhub-intl.tencentcloudmaas.com/v1`, OpenAI-compatible, tool calling + structured output). **Extractor: `hy3`** (Tencent Hunyuan). **Validator: DeepSeek-V4-Flash**: a different vendor, so errors are less correlated (a genuine "dual engine"). `hy4-preview` kept as an A/B option. Budget: ~1M free tokens ≈ 250 conversation turns ⇒ day-to-day dev and eval iterations run on the **personal DeepSeek key**; TokenHub is used for integration, final eval, video and Demo Day. Model IDs are env config (`EXTRACT_MODEL`, `VALIDATE_MODEL`, `LLM_BASE_URL`). |
-| API | FastAPI: `agent` app and `gateway` app as **two processes** (+ `ledger` module owned by gateway) |
-| Biometrics | `py_webauthn` + small vanilla JS |
-| Frontend | **React** (Vite + TypeScript + Tailwind), mobile-first PWA-style; `@simplewebauthn/browser` for biometrics; Web Speech API for the mic. Talks to the FastAPI apps over JSON only; the UI never computes hashes itself for trust (the gateway recomputes). Dev: Vite proxy on `localhost` so WebAuthn works without HTTPS. |
-| DB | SQLite (ledger, mandate, audit chain, nonces) |
-| Tracing | Langfuse SDK v3 (+ Tencent APM OTLP exporter later) |
-| Voice | Web Speech API → Tencent ASR |
-| Tests | pytest: invariants, gateway attacks, golden eval set |
-| Deploy (bonus) | Tencent Cloud Lighthouse + Docker Compose + HTTPS domain (WebAuthn needs HTTPS off localhost) |
+| Transactions | SGD only; `transfer`, `pay_bill`, `pay_card`, `buy_equity`; ordered bundles of 1–4 legs |
+| Transfers | Own-account transfers, saved payees, and saved PayNow recipients using simulated routing |
+| Payments | Saved billers and owned credit cards, including bank-resolved outstanding balance |
+| Equities | Mock SGX D05, O39, U11, Z74 quotes, holdings and purchases; explicit quantity, price, debit and residual budget before approval |
+| Conversation | Voice and text, colloquial amounts, aliases, multiple intents, clarification and corrections, supported relative amounts with explicit dependencies |
+| Controls | Independent semantic validator, deterministic policy, WebAuthn approval, hard mandate limits, cooling for increases, immediate pause/decrease, KYC, sanctions, velocity, scam signals and simulated secondary approval |
+| Interface | React chat, microphone, confirmation, visible changes, audit/evidence view, mandate management and accessible edit/cancel flows |
+| Evidence | Raw input records, prototype hash-chained audit, **Langfuse backend**, Rogue Agent Mode, attack tests, evaluation comparison and CodeBuddy evidence |
 
-Repo layout:
+Real WebAuthn remains the implementation target. The handbook permits mock biometrics and a mock bank gateway; that remains a documented contingency, not an automatic scope change. Explicitly identify all bank, PayNow, equity, KYC, sanctions and secondary-approval services as simulated. Tencent TRTC ASR remains the planned voice integration, with browser speech as a development/failure fallback. Tencent APM, TTS and public Lighthouse hosting remain optional additions as in v0.2. Signed intent-pack registries, agent signatures, signed receipts and independent audit checkpoints are future recommendations; the old architecture drew them without corresponding MVP tasks.
+
+**Security principle and threat model**
+
+GenAI produces drafts and semantic assessments. It cannot authorize funds. Assume either model can hallucinate, obey injected instructions or return `MATCH` for a bad draft. Both models have no execution tools, ledger access, signing keys or ability to change policy. Different vendors may provide useful diversity; reduced correlated error is a hypothesis to measure.
+
+Trusted components are the authenticated input capture, application confirmation UI, gateway code and identity store, ledger permissions, and validator-service configuration. Attacker-controlled content includes speech/text, references, labels and model output. A compromised browser, authenticator, gateway host or deployment credential is outside this prototype's demonstrated guarantees. A user may also approve a mistaken or socially engineered payment; cryptographic binding does not prove informed intent.
+
+The semantic validator is not immune to prompt injection. Deterministic checks do not interpret free text as instructions, but still require correct implementation. The claim to demonstrate is: even when both models are wrong, they cannot bypass exact-payload user approval or gateway policy. Do not claim universal safety, regulatory compliance or guaranteed legal non-repudiation.
+
+**Workflow and service ownership**
+
+1. The authenticated client submits text, final ASR transcripts and corrections to a gateway-owned conversation store. Original audio is retained separately with a digest. Distinguish user turns, ASR revisions, bank data and application questions; preserve all versions. The drafting agent cannot append fabricated user turns.
+2. The agent reads a scoped snapshot, bounds input size, extracts structured slots, parses supported amounts and obtains account/payee/biller/card/quote metadata over read APIs. No model chooses tools.
+3. Deterministic resolution returns all plausible candidates. Missing or ambiguous values trigger short questions. Corrections create a new conversation revision; never silently change an approved draft.
+4. The agent proposes a bundle. The gateway validates the schema, ownership and metadata, computes dependency arithmetic, canonicalizes the resolved bundle and freezes its version. Agent-supplied names, provenance labels and totals are not authoritative.
+5. The gateway requests validation from a separate read-only validator service using its stored conversation, exact frozen bundle and minimum bank metadata. It obtains the result directly, checks the output schema and binds the result to the bundle and conversation hashes. Agent-supplied “validation passed” flags are rejected.
+6. A successful semantic check and deterministic pre-check allow the gateway to issue a signing envelope. The client fetches it directly from the gateway and renders precise details, totals, residual cash and any changes.
+7. WebAuthn approval is bound to the full envelope. After verification the gateway rechecks live policy; any required secondary approval is bound to the same transaction. Only then may one atomic mock-ledger commit execute the legs and return a receipt.
+8. Every stage produces audit events and correlated Langfuse observations. A receipt supports “You said → We clarified → You approved → Executed.” Technical hashes are expandable details.
+
+The agent uses READ and DRAFT functions only. The gateway alone issues nonces and executes transactions. `shared/` holds pure schemas, canonicalization and clients, not an execution dispatcher. `agent/` and `validator/` must not import `gateway/` or `ledger/`. Import tests supplement actual isolated runtime permissions. Only the gateway mounts the ledger/audit database; models and agent containers cannot access its file or credentials. Agent audit events go through a scoped append API and cannot impersonate gateway decisions.
+
+**Validator contract and prompt protection**
+
+The validator's job is to compare all requested actions against all drafted actions, including beneficiary, amount, currency, source account, asset, quantity and dependencies. Its inputs contain the complete ordered conversation including clarification questions and user corrections, an immutable bundle, and authoritative ID-to-display mappings. It receives no extractor reasoning or extractor-written summary. Bank labels are evidence, not instructions. An incorrect ASR transcript may fool both models, so the user must see and be able to correct it.
+
+Use a fixed, version-controlled system prompt on the validator backend. Users and the agent cannot set its instructions, model or output schema. Keep secrets out of prompts and design as if the prompt is public. Separate policy instructions from serialized data, bound input sizes, and require structured output; these are mitigations, not proof against injection. Do not truncate relevant history silently: require a fresh explicit restatement when the supported context budget is exceeded. Prompt changes require review and evaluation, and prompt version/hash is logged to Langfuse. Avoid mutable remote prompt labels during a demonstration.
+
+Return `MATCH | MISMATCH | UNCERTAIN` and bounded issues containing leg ID, field, short reason, supported value when known, and evidence turn/span references. No tool calls, transaction edits, repair execution or arbitrary HTML. Server code verifies field names and evidence locations; a valid reference does not prove the model's interpretation is correct.
+
+- MATCH: eligible for confirmation only, never authorization.
+- MISMATCH: freeze this draft and show deterministic field-level feedback; any correction creates a new version and revalidation.
+- UNCERTAIN: ask for clarification; do not approve.
+- Timeout, unavailable model, malformed JSON or unknown verdict: stop approval with a retry option; no fallback to MATCH.
+
+Backend code records the verdict with `bundle_hash`, `conversation_hash`, `conversation_revision`, `validator_prompt_hash`, model ID and trace ID. Every subsequent change invalidates validation and pending approval. The independent audit runs after compilation; it is not described as simultaneous extraction. Freeze model and prompt versions for evaluation comparisons.
+
+**Signing and execution contract**
+
+Money uses Decimal and serializes as two-decimal strings; reject floats, non-finite/negative values and excessive precision. Mock equity prices are also two-decimal SGD values. All signed timestamps have one UTC ISO-8601 Z format. Canonical JSON has sorted object keys, compact separators and UTF-8; array order is meaningful. IDs and strings are validated before freezing; do not normalize them after signing.
+
+The versioned `SigningEnvelope` contains `schema_version`, `operation` (`execute_bundle` or `update_mandate`), authenticated `user_id`, `credential_id`, `bundle_id` or `change_id`, full immutable payload, conversation binding for a bundle, active mandate version, a random 32-byte nonce, `issued_at` and `expires_at`. Expires at most 120 seconds after issue, and no later than a quote's expiry. Do not allow client-selected users or operation changes.
+
+`challenge = SHA256(b"DCTA:approval:v1\x00" + canonical_bytes(envelope))`.
+
+Use this exact function when issuing and verifying. Store the envelope bytes and hash server-side. Execute requests carry the authorization ID, expected envelope hash and assertion, not a replacement payment payload. The gateway executes its stored payload. Verify session, credential ownership, origin, RP ID, user verification, expected challenge, validity and current revision; require a new challenge after any edit. Signed mandate operations cannot authorize payments.
+
+WebAuthn RP ID and origin are bound to the host: `localhost` works over plain HTTP on the development laptop (Touch ID via Chrome/Safari), but a phone requires an HTTPS origin, and credentials enrolled on one RP ID do not work on another. Record the demo on the laptop unless a hosted HTTPS deployment is tested and re-enrolled. WebAuthn user verification may use a PIN or biometrics. A React overlay remains trusted application UI, not a browser-protected payment confirmation surface. Do not equate this implementation with Secure Payment Confirmation. Source accounts, owned cards and payees must belong to or be operable by the authenticated user, regardless of signature validity.
+
+Authorization states: `PENDING_APPROVAL → AWAITING_STEP_UP → COMMITTED`, or directly `PENDING_APPROVAL → COMMITTED`; terminal alternatives are `BLOCKED`, `EXPIRED`, `CANCELLED`, `SUPERSEDED`. A step-up transition retains verified approval evidence but does not move funds. Only one terminal commit is allowed. Store the secondary challenge against the user, envelope hash, approval ID and expiry; verify through a separate simulated channel, with single-use proof and bounded attempts. The agent cannot create or complete that proof.
+
+Dispatch deterministic policy by operation type. Signed mandate settings require authenticated ownership and valid change rules, not a semantic MATCH or sufficient funds for a payment. A paused/expired spending mandate must not prevent its owner from submitting an authorized settings change; relaxation still observes cooling. Payment-only eligibility checks cannot be bypassed by changing the signed operation type.
+
+Commit policy rechecks, balance/holding mutations, daily/velocity counters, nonce consumption, secondary-proof consumption, receipt and mandatory audit event in one SQLite transaction. Recheck state under the transaction lock to handle concurrent requests. Idempotency is scoped to `(user_id, operation, bundle_id/change_id)` and the immutable payload hash: the identical authenticated retry returns the original receipt; changed payload with that key rejects. Retry after a lost response must not repeat effects. In-flight step-up retries return the same pending status, never consume the proof twice.
+
+**Mandates, risk and transaction semantics**
+
+All numeric settings below are prototype policy choices, not statements about DBS or regulatory rules.
+
+- Hard mandate: active and unexpired; allowed actions are all four MVP actions; maximum four legs; SGD1,000 debit per leg; SGD3,000 aggregate daily debit. Unregistered beneficiaries block. Saved PayNow mappings are resolved server-side. Daily totals use Asia/Singapore calendar boundaries, even though stored times are UTC.
+- KYC: verified/unverified/expired status and tier. Unverified/expired blocks. Tier daily ceilings: SGD500/5,000/20,000; apply the stricter of KYC and mandate limits. Mock sanctions block regardless of secondary approval.
+- Velocity: at most five transfer legs in a rolling ten-minute window across bundles, counting the candidate bundle and committed transfers. Serialized checks prevent concurrent bypasses.
+- Sufficient funds: simulate ordered effects across every leg, including internal credits, fees if modeled, card outstanding balance and equity debit. Reject the whole mock bundle on any failure. Count every outgoing leg toward spending ceilings; state this conservative rule to avoid ambiguity about own-account transfers.
+- Risk threshold: default SGD500 aggregate bundle debit triggers simulated secondary approval when exceeded but still inside all hard limits. Deterministic urgency/“safe account”/impersonation signals from the gateway-held transcript may also trigger it. Keyword rules can miss scams and can flag benign requests; measure both. Offer the immediate conversational-channel pause control, without claiming it locks all bank funds.
+- **No step-up can override a hard mandate, KYC, sanctions, ownership, balance or velocity block.**
+- Mandate increases or permission expansions require a separately signed change and 12-hour cooling. Keep the old version active until then. Decreases and pauses are immediate, cancel pending increases and invalidate pending payment approvals. Mixed increases/decreases are rejected with guidance to submit separately. Limit one pending increase; replacement cancels the prior pending record. Recheck active version at execution; old approvals require reapproval after an effective version change. The settings page shows current and pending values and activation time.
+- Relative amounts use a bounded representation: literal, fraction of a named preceding leg, or an explicitly identified remaining balance. No arbitrary expression evaluation. Ambiguous “half of it” asks which amount/account; dependency cycles, missing references and unsupported expressions reject. Compute dependencies with Decimal before validation and signing.
+- Equity budget, quote ID/time/expiry, unit price, quantity, maximum debit, actual mock debit and unspent budget are fixed before approval. Quantity is floor(budget / unit price) for this simulated whole-share market, with zero quantity rejected. Show the whole-share simplification. Execute only against that unexpired mock quote; never recompute quantity at execution. On expiry or changed terms, re-quote, revalidate and obtain fresh approval. Real market settlement is outside the prototype.
+
+Provenance is derived by trusted code from source IDs, captured spans, user selections and bank lookups. Model-proposed span references are checked, not trusted as proof. Free-text bill references and pasted instructions cannot become beneficiary or amount sources; derived values preserve all dependencies and taint. Provenance supports review and policy checks, but is not a guarantee that natural language was understood correctly.
+
+**Langfuse backend and audit — both required**
+
+Use a real Langfuse Cloud project as the default backend. No-op instrumentation or local console logs do not satisfy completion. Use the current supported Python SDK, pin the tested version, and verify actual exported data in the project. The prior v3 assumption is superseded by current official SDK documentation; do not mix examples from different major versions. Self-hosting is a deployment choice if needed, not a replacement with no observability.
+
+For each interaction, record workflow observations for ingest, extract, normalize, resolve, clarify, compile, semantic validation, policy, challenge, approval outcome, secondary approval, execution and receipt as applicable. Include separate LLM generation observations with model, prompt version/hash, sanitized input/output, latency, token usage when available, and cost only when pricing is known. Use pseudonymous user IDs, shared session IDs, bundle/revision IDs and consistent trace context across service calls. Resumed user turns can start linked traces within the same session; do not leave a span open while waiting for a person.
+
+Show trace links from the evidence viewer. Publish the golden dataset and comparable extractor-only/dual-engine experiments, with exact critical-field match, false accepts/rejects, clarification accuracy, latency and cost. Record missing usage/pricing as unavailable, not zero. Keep the validator's measured contribution separate from deterministic authorization rejection metrics.
+
+Implement explicit allowlisted exports: no API keys, cookies, auth headers, OTPs, private keys, WebAuthn assertions, full account identifiers or raw audio in Langfuse. Use synthetic model-visible data and sanitized trace payloads. Raw evidence stays in the access-controlled local audit store; define participant recording consent and retention for usability sessions. Never auto-capture arbitrary function arguments. Langfuse errors produce a visible observability health warning and bounded export/retry; they never relax authorization. Local audit failure blocks transaction commit. A real exported trace and experiment run remain submission acceptance requirements, even if offline unit tests use a fake exporter.
+
+Audit rows include service identity, sequence, timestamps, step, event payload, correlation IDs and predecessor hash. The gateway owns writes; agent-reported events are distinguished from trusted decisions. A hash chain detects changes relative to retained history, but does not alone prove resistance to a privileged full rewrite or truncation. Replay uses captured model outputs and bank snapshots, not a claim that live model reruns reproduce identical decisions. Independent checkpoints remain a documented future enhancement.
+
+**Stack and layout**
+
+Python 3.12, uv, FastAPI, Pydantic, LangGraph, provider-compatible LLM client, py_webauthn, SQLite, pytest/ruff; React/Vite/TypeScript/Tailwind and SimpleWebAuthn browser helper; Langfuse SDK and backend. Use separate service credentials with least privilege, not a shared superuser token.
+
 ```
-agent/        graph.py, nodes/, llm.py, firewall.py, numparse.py, prompts/
-gateway/      app.py, verify.py, policy.py (mandate/KYC/velocity/scam), execute.py
-ledger/       models.py, seed.py
-shared/       schemas.py (Draft, Leg, Mandate…), canonical.py, audit.py, skills.py (registry)
-web/          React app (Vite + TS + Tailwind): chat, mic, overlay, audit viewer, mandate settings
-evals/        golden.jsonl, run_eval.py
-tests/
-docs/         PLAN.md, architecture.png
-CODEBUDDY.md  project rules for every CodeBuddy session
+agent/        fixed graph, extraction, parsing, scoped READ/DRAFT clients
+validator/    read-only semantic audit service, fixed prompt, strict result schema
+gateway/      identity, conversation snapshots, validation orchestration, challenge,
+              mandate/policy, approval state machine, execution, audit APIs
+ledger/       mock accounts, payees/PayNow, billers, cards, equities, transactions
+shared/       pure types/canonicalization, telemetry helpers, scoped API clients
+web/          chat/audio, confirmation, mandate screen, evidence viewer
+prompts/      version-controlled extractor and validator instructions
+infra/        service images and Compose isolation; optional public deployment
+evals/        golden dataset, experiment runner, measured reports
+tests/        semantic fixtures, policy, lifecycle, isolation and attack tests
 ```
 
----
+Models and providers are configurable per service (`EXTRACT_PROVIDER/MODEL`, `VALIDATE_PROVIDER/MODEL`). Verified 9 October: extractor TokenHub `hy3` (a reasoning model; needs a generous max_tokens) and validator DeepSeek API `deepseek-flash`, because only `hy3` is activated on the TokenHub account. The validator can move to TokenHub DeepSeek once activated; the vendors stay different either way. Verify exact model IDs, structured-output support, credits and latency. Preserve personal-provider development configuration separately and label evaluation runs accurately. Follow the supplied TRTC quickstart for the exact ASR SDK and credential type; do not conflate SDKSecretKey and cloud SecretKey. Stop recording on completion/cancel and handle denied microphone permissions explicitly.
 
-## 8. Invariants (on a slide *and* as tests)
+TRTC ASR facts checked 9 October 2026 against the SDK READMEs (re-verify the installed version in T-00): the official Python SDK is `trtc-asr` 2.0.0, installed from the Tencent-RTC GitHub tag because it is not on PyPI despite its README (`trtc_asr.v3.SentenceRecognizer` for `POST /v3/transcribe`, `SpeechRecognizer` for WebSocket streaming). It authenticates with SDKAppID + SDKSecretKey only; the international host is `asr-intl.cloud-rtc.com`. Sentence recognition accepts wav/pcm/ogg-opus/mp3/m4a, up to 60 seconds and 3 MB; use engine `bigmodel` with an explicit `en` language hint. MVP voice uses push-to-talk sentence recognition: the browser captures 16 kHz mono PCM through an AudioWorklet and uploads a WAV clip to the gateway, which stores the same bytes as audio evidence and calls TRTC. This avoids server-side WebM conversion and keeps TRTC credentials in the gateway only. Streaming recognition with interim results is an optional enhancement after the sentence path works. TRTC credentials and recognized text are gateway-held; the agent only ever sees the stored final transcript.
 
-- **I1** The agent process cannot import or reach any `EXECUTE` skill or ledger-write credential.
-- **I2** The gateway executes only payloads whose SHA-256 was the challenge of a user-verified WebAuthn assertion.
-- **I3** The overlay is rendered from the same canonical bytes that are hashed.
-- **I4** Nonces are single-use and expire in 120 s.
-- **I5** No execution may exceed the active Agent Mandate without a step-up.
-- **I6** Every node appends to the hash-chained audit log.
-- **I7** A value whose provenance is `untrusted_text` can never fill `payee` or `amount`.
+TRTC Real-time AI Conversation (quickstart §3.1) is deliberately not used: it runs the LLM turn loop inside TRTC's cloud against a publicly reachable model endpoint, which would bypass the fixed graph, the gateway-owned conversation store and the validator. Standalone ASR (§3.2) keeps speech as input only. Free allowance is 10,000 credit-minutes per month for one year, shared across TRTC services; check Package Management after creating the application. Integration support: the hackathon Telegram group linked in the quickstart.
 
----
+**Acceptance invariants**
 
-## 9. What makes it stand out (vs. teams that just implement the brief)
+- I1: agent and validator have no ledger mount/write access, execution dispatcher or signing credentials; test runtime permissions as well as imports.
+- I2: execution requires valid user approval bound to the exact server-stored envelope and correct authenticated owner.
+- I3: confirmation renders that same envelope; edits supersede validation and approval.
+- I4: approvals and step-up proofs are fresh and single-use; concurrent/repeated requests cause at most one commit.
+- I5: hard policy limits cannot be overridden by model output or secondary approval.
+- I6: mandatory audit records commit with financial effects; each workflow stage has trace correlation and required Langfuse instrumentation.
+- I7: trusted code assigns source lineage; untrusted reference text cannot populate critical fields through relabeling or derived-value laundering.
+- I8: semantic uncertainty/errors prevent approval; a forged MATCH from the agent cannot satisfy validation. Even an actual validator forced to MATCH cannot bypass I1–I5.
+- I9: ordered mock bundles are all-or-nothing; signed quantities and terms do not change at execution.
 
-1. **Deterministic by construction:** the LLM is confined to 2 of 12 nodes, shown live in Langfuse/Tencent APM.
-2. **Agent Mandate** with cooling on increases: an AP2-style delegated limit adapted to SG anti-scam practice.
-3. **Provenance-tagged fields:** injection defence by construction (I7), shown colour-coded on the overlay.
-4. **Scam-aware step-up:** protects the user from a coached transfer, not just from a rogue AI.
-5. **Rogue Agent Mode demo:** swap in a malicious extractor → validator freezes → gateway rejects unsigned →
-   tamper-after-sign ⇒ hash mismatch.
-6. **Measured:** golden set (~30 utterances incl. Singlish + adversarial) with reproducible scores in Langfuse.
+**Schedule and winning evidence**
 
----
+The earlier estimate was roughly 55 hours starting 1 October. At 3–4 hours/day, 9–15 October provides only 21–28 hours. Retaining full scope does not remove that gap. The dates below are aggressive targets, not a claim that implementation fits the available hours. Update estimates after the first vertical flow; escalate schedule risk without silently dropping MVP features.
 
-## 10. Timeline (≈55 h)
+| Target date | Milestone |
+|---|---|
+| 9 Oct | Scope/contracts, credentials, scaffold, model/ASR/Langfuse smoke checks |
+| 10 Oct | One authorized text transfer, runtime isolation and correlated Langfuse trace |
+| 11 Oct | All four actions, four-leg bundles, dependencies, clarification/corrections and validator |
+| 12 Oct | Voice, WebAuthn, mandate settings/cooling, risk/step-up, evidence UI |
+| 13 Oct | Concurrency/attack tests, dataset experiments and usability comparison; feature freeze target |
+| 14 Oct | Repair failures; record demo, architecture and actual metrics |
+| 15 Oct | Clean-start rehearsal, submission assets and early submission |
+| 16 Oct | Contingency and deadline; verify cutoff beforehand |
 
-| Dates | Hours | Phase | Done when |
-|---|---|---|---|
-| 1 Oct | 3 | **P0 Setup** | `uv` project, repo layout, `CODEBUDDY.md`, Langfuse account, seed data. Screenshots start. |
-| 2–4 Oct | 10 | **P1 Deterministic core** | schemas, canonical JSON, audit chain, ledger + seed, skill registry, gateway (WebAuthn verify, nonce, mandate, execute) + attack tests. *No LLM needed.* |
-| 5 Oct | — | **Start Tencent trial** | 1 month ⇒ covers Demo Day 3 Nov. Get TokenHub key (+ ASR later). |
-| 5–8 Oct | 13 | **P2 Agent graph** | LangGraph nodes 1–10, number parser, resolver, clarify loop, extractor + validator prompts, firewall, Langfuse tracing. |
-| 9–11 Oct | 11 | **P3 React UI + biometrics** | chat + mic + text, overlay, WebAuthn signing, clarification chips, audit viewer, mandate settings screen. (Scaffold on 1 Oct in P0 so the UI grows alongside P1–P2.) |
-| 12 Oct | 4 | **P4 Risk + demo features** | step-up mock, scam signals, mandate cooling, Rogue Agent Mode; Tencent ASR if time allows. |
-| 13 Oct | 4 | **P5 Eval + deploy** | golden-set run, results table; Lighthouse HTTPS deploy (or local + video). Tencent APM exporter. |
-| 14–15 Oct | 7 | **P6 Submission** | description, architecture diagram, Miora cover, 5–8 min video, CodeBuddy screenshots. |
-| 16 Oct | 2 | Buffer + submit | submit early. |
+Use a ~30-case golden set across ordinary requests, corrections/ambiguity, multi-intent dependencies and adversarial content, with at least one success and one failure per action. Include real recorded voice samples separate from text-only evaluation. Compare extractor-only against extractor+validator using the same captured candidate drafts and frozen inputs; do not change gateway authorization for either condition. Publish sample counts and errors, not fabricated accuracy or universal security claims.
 
-**Cut-line (drop in this order):** Tencent APM exporter → TTS → Tencent ASR (keep browser speech) → UI polish
-(animations, dark mode) → scam signals (keep mandate) → deploy (local + video). **Never cut:** WebAuthn signing, gateway verification,
-mandate enforcement, validator, audit chain, injection demo.
+Conduct a small comparison with approximately five consenting testers and synthetic accounts: same tasks on a simple form/menu baseline and DCTA, alternating order. Measure completion time, interactions, success, incorrect approvals, and ability to identify recipient/source/total debit. Record at least one observation and resulting design change. Small-sample results are exploratory.
 
----
+Demo: identify DBS Scenario 1; request transfer+card payment; clarify John; correct fifty to fifteen and show the changed field; approve and show receipt/evidence; show a multi-step equity example; force validator MATCH and demonstrate unsigned/tampered execution rejection; show one policy/step-up outcome; show Langfuse trace and experiment comparison. Rehearse network loss after commit, duplicate submit and misunderstood speech. Keep the video 5–8 minutes with clear mock labels.
 
-## 11. CodeBuddy workflow (proof of use is mandatory)
+Rogue Agent Mode runs through an explicit local demo/test harness with malicious extraction and forced-MATCH fixtures. Keep it unavailable to ordinary HTTP clients and disabled in any public deployment. It must exercise the real gateway checks, not replace the authorization verifier with a stub.
 
-- **Headline features in the IDE** (`buddy chat -m agent "<prompt>"`): gateway verify, WebAuthn, validator,
-  mandate. You screenshot these chats.
-- **Boilerplate via CLI** (`codebuddy -p … --model hy3 --output-format json`): seed data, templates, tests.
-  JSON logs are kept in `docs/devlog/` as extra proof.
-- Claude reviews every task via `git diff` + tests, then commits locally. **No pushes.**
+For feasibility, show a hypothetical authenticated-customer pilot using saved beneficiaries and existing bank identity/risk controls. Distinguish the full hackathon simulator from a staged real-bank rollout. External settlement, production identity, compliance and independent audit anchoring require additional work.
 
----
+**Submission and workflow**
 
-## 12. Open decisions
+Original project built with CodeBuddy or WorkBuddy; at least three clear development screenshots/recordings; title; blurb under ten words; description covering users, pain points, architecture/prompts and measured value; 16:9 cover. Keep the planned video even though optional. A live project link is optional and earns bonus points in the handbook. Miora can create the cover but is not a mandatory tool. Confirm any source-sharing requirement before publication.
 
-1. ~~LLM key before trial~~ **Resolved:** TokenHub free tokens (hy3 + DeepSeek-V4-Flash) + personal DeepSeek key for dev.
-2. ~~Tracing~~ **Resolved:** Langfuse Cloud free tier.
-3. ~~Docker~~ **Resolved:** Docker Desktop installed (needed for deploy only).
-4. ~~Mandate values~~ **Resolved:** S$1,000 / S$3,000 as seed defaults, configurable (env + settings screen).
-5. ~~Front end~~ **Resolved:** React (Vite + TS + Tailwind). Costs ~5 h vs HTMX; absorbed from P4.
+Use CodeBuddy for meaningful implementation tasks and capture evidence as work happens. Reviewer checks diffs and relevant acceptance tests. Do not commit, push, publish, create/edit `.env`, or expose credentials as part of the task checklist; `.env.example` contains placeholders only. Credentials are supplied manually through the user's chosen secret configuration. Recommendations can remain in the review without changing required scope.
+
+References: local handbook pages 6–8, 37–40 and TRTC quickstart in `references/`; [organizer event](https://luma.com/26fqf3hy); [WebAuthn](https://www.w3.org/TR/webauthn-3/); [OWASP prompt injection guidance](https://cheatsheetseries.owasp.org/cheatsheets/LLM_Prompt_Injection_Prevention_Cheat_Sheet.html); [Langfuse instrumentation](https://langfuse.com/docs/observability/sdk/instrumentation); [Langfuse experiments](https://langfuse.com/docs/evaluation/experiments/experiments-via-sdk).

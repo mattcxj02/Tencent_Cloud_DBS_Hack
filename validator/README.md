@@ -1,0 +1,21 @@
+# validator
+
+The independent semantic validator service (FastAPI, port 8003, reachable only from the gateway). It compares the user's full conversation with the frozen bundle and returns `MATCH`, `MISMATCH` or `UNCERTAIN`. A `MATCH` only allows the confirmation screen; it never authorizes execution. A schema-valid verdict can still be wrong.
+
+| File | Purpose |
+|---|---|
+| `app.py` | `GET /health` (token/model/prompt-hash status, no secrets) and `POST /internal/validate`. Checks the service token (constant-time), body size (256 KiB), strict request schema, context budget, conversation consistency, bundle/conversation binding and bank-label coverage before any model call. Traces each authenticated validation (see Telemetry below) |
+| `prompt.py` | Loads the fixed prompt `prompts/validator.md` once and exposes `PROMPT_HASH` (SHA-256 of the file). Builds exactly two messages: system = prompt only; user = request data as JSON between fixed markers, with `<`/`>` escaped so data cannot forge a marker. Bundle lineage is not shown to the model |
+| `llm.py` | `LLMClient` interface and the OpenAI-compatible client: temperature 0, `response_format` JSON object, no tools, `max_retries=0`; `reasoning_content` is ignored |
+| `service.py` | One model call under a wall-clock deadline (`VALIDATE_TIMEOUT_SECONDS`, default 30), then strict output checks. Every failure is `status: ERROR` with a stable code, never a MATCH |
+
+The request/response schemas, error codes, input hash and output reference checks live in `shared/clients/validator.py` so the gateway can use them too.
+
+**Contract.** `POST /internal/validate` with `Authorization: Bearer <VALIDATOR_SERVICE_TOKEN>` and a `ValidationRequest`: `request_id`, `conversation` (`conversation_id`, `revision`, `conversation_hash`, ordered `turns` with `turn_id`, `seq`, `role`, `text`, `edits_turn_id`, `answers_question_id`), `bundle` (the stored `FrozenBundle`) and `bank_metadata` (`accounts`, `targets` with display labels). Unknown fields, including any extractor reasoning or prompt override, are rejected.
+
+- 401 `UNAUTHORIZED`, 503 `SERVICE_TOKEN_UNSET` (no token of >= 32 chars configured: every request is refused), 413 `CONTEXT_LIMIT_RESTATE` (over 40 turns, 2,000 chars per turn or 20,000 total; nothing is truncated), 422 `INVALID_REQUEST` / `CONVERSATION_INVALID` / `BINDING_MISMATCH` / `BANK_METADATA_INCOMPLETE`. Body: `{"status": "ERROR", "code": ...}`. No model call.
+- Otherwise 200 with `{status, verdict?, issues?, code?, model, prompt_hash, input_hash, latency_ms, usage?}`. `input_hash` is SHA-256 of the canonical request. Model output must be exactly `{verdict, issues}`; MATCH needs zero issues, MISMATCH at least one; leg IDs and evidence spans must exist in the request. Anything else, plus timeout, provider error, empty, truncated or tool-call replies, gives `status: ERROR`.
+
+**Boundary:** no execution tools, ledger access or signing keys; imports `shared/` only (never `gateway`, `ledger`, `agent` or `tests`). No route, header or setting can skip the model check or force a verdict; the always-MATCH stub exists only in `tests/validator_fakes.py`. Uses a different model vendor from the extractor (currently DeepSeek `deepseek-flash`). Runs on its own Docker network, so the agent cannot reach it.
+
+**Telemetry (Langfuse, via `shared/telemetry`).** Each authenticated `POST /internal/validate` is one `semantic_validation` workflow span that continues the gateway's trace from a validated `traceparent` header (correlation only, never authentication), with a nested `validator-llm-call` generation: model, provider, prompt version (`validator-v<N>` from the prompt's first line) and `PROMPT_HASH`, usage when reported (otherwise `usage_status=unavailable`), latency and the verdict as `validator_verdict`. The generation input is the data the model sees with account IDs replaced by their display labels; the system prompt is identified by hash only and the service token never reaches telemetry. Refusals (422/413) are traced as `rejected` without a generation; 401s are not traced. No generation is recorded when no model is configured. Without Langfuse keys the spans are no-ops; `create_app(telemetry=...)` lets tests inject `Telemetry.for_testing`. Telemetry never changes a result.
