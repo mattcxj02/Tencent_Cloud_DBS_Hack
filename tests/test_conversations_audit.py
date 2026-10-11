@@ -672,7 +672,7 @@ class TestAgentImpersonation:
         # Remove the test session override so only the agent's token is presented:
         # user routes must fail closed (401) rather than accept a delegation token.
         app.dependency_overrides.pop(require_user_session, None)
-        for path in ("text", "asr", "transcript-edit", "answer"):
+        for path in ("text", "voice", "transcript-edit", "answer"):
             resp = client.post(
                 f"/api/conversations/{conv_id}/{path}",
                 json={"text": "fabricated user turn"},

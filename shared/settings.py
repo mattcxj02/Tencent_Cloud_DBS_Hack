@@ -125,7 +125,8 @@ class ValidatorSettings(LLMSettings, LangfuseSettings, ValidatorServiceTokenSett
     # DeepSeek direct until deepseek-v4-flash is activated on TokenHub (it returns 400/402 there).
     llm_provider: LLMProvider = Field(default="deepseek", alias="VALIDATE_PROVIDER")
     validate_model: str = Field(default="deepseek-flash", alias="VALIDATE_MODEL")
-    validate_max_tokens: int = Field(default=2048, alias="VALIDATE_MAX_TOKENS")
+    # Measured: 2 of 56 eval calls spent all 2,048 tokens on reasoning (no answer).
+    validate_max_tokens: int = Field(default=4096, alias="VALIDATE_MAX_TOKENS")
     # Wall-clock limit for one model call; on expiry the result is ERROR, never MATCH.
     validate_timeout_seconds: float = Field(
         default=30.0, gt=0, le=120, alias="VALIDATE_TIMEOUT_SECONDS"
@@ -145,6 +146,9 @@ class GatewaySettings(LangfuseSettings, TRTCSettings, ValidatorServiceTokenSetti
     # Internal semantic validator (T-10). Compose must point this at http://validator:8003.
     validator_base_url: str = Field(default="http://localhost:8003", alias="VALIDATOR_BASE_URL")
     agent_base_url: str = Field(default="http://localhost:8001", alias="AGENT_BASE_URL")
+    # hy3 reasons before answering: 4–12 s per extraction measured, longer on long
+    # conversations. 15 s timed out a live follow-up turn.
+    agent_timeout_seconds: float = Field(default=45.0, gt=0, le=120, alias="AGENT_TIMEOUT_SECONDS")
     # Must exceed the validator's own model timeout (VALIDATE_TIMEOUT_SECONDS, default 30).
     validator_client_timeout_seconds: float = Field(
         default=40.0, gt=0, le=180, alias="VALIDATOR_CLIENT_TIMEOUT_SECONDS"

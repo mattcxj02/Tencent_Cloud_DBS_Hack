@@ -206,12 +206,14 @@ def get_validator_client() -> ValidatorClient:
 
 
 def get_validation_telemetry() -> Telemetry:
-    """The gateway's Langfuse facade for validation spans (disabled without keys)."""
-    global _telemetry
-    with _wiring_lock:
-        if _telemetry is None:
-            _telemetry = Telemetry(load_gateway_settings(), "gateway")
-        return _telemetry
+    """The facade for validation spans: the gateway's single process-wide telemetry
+    (``gateway.telemetry``), unless a test injected one with ``_set_validation_telemetry``."""
+    override = _telemetry
+    if override is not None:
+        return override
+    from gateway.telemetry import get_gateway_telemetry
+
+    return get_gateway_telemetry()
 
 
 def _set_validator_client(client: ValidatorClient | None) -> None:

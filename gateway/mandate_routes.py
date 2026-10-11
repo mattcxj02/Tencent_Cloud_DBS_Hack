@@ -38,6 +38,7 @@ from gateway.auth.session import UserPrincipal, require_user_session
 from gateway.drafts import get_draft_store
 from gateway.identity_routes import _check_origin
 from gateway.mandates import REASON_CODES, MandateError, MandateService
+from gateway.telemetry import stage
 from shared.schemas import Action
 
 router = APIRouter(tags=["mandate"])
@@ -81,6 +82,10 @@ _HTTP_STATUS: dict[str, int] = {
 }
 
 
+#: Telemetry attributes of signed mandate-change spans (T-08); no limits or amounts.
+_MANDATE_OP = {"operation_type": "update_mandate"}
+
+
 def _service() -> MandateService:
     return MandateService(get_draft_store().db_path)
 
@@ -110,20 +115,24 @@ def request_mandate_change(
     """Validate the change and issue its ``update_mandate`` signing envelope."""
     _check_origin(request)
     service = _service()
-    try:
-        authz_id = service.request_change(
-            user_id=user.user_id,
-            credential_id=body.credential_id,
-            per_leg_limit=body.per_leg_limit,
-            daily_limit=body.daily_limit,
-            allowed_actions=[a.value for a in body.allowed_actions]
-            if body.allowed_actions is not None
-            else None,
-            paused=body.paused,
-        )
-        return service.change_view(user.user_id, authz_id)
-    except MandateError as exc:
-        return _error(exc)
+    with stage("challenge", user_id=user.user_id, attributes=_MANDATE_OP) as span:
+        try:
+            authz_id = service.request_change(
+                user_id=user.user_id,
+                credential_id=body.credential_id,
+                per_leg_limit=body.per_leg_limit,
+                daily_limit=body.daily_limit,
+                allowed_actions=[a.value for a in body.allowed_actions]
+                if body.allowed_actions is not None
+                else None,
+                paused=body.paused,
+            )
+            view = service.change_view(user.user_id, authz_id)
+        except MandateError as exc:
+            span.set_status("rejected", reason_code=exc.code)
+            return _error(exc)
+        span.set_attributes({"authorization_id": authz_id})
+        return view
 
 
 @router.get("/api/mandate/changes/{authz_id}", response_model=None)
@@ -143,12 +152,22 @@ def approve_mandate_change(
     _check_origin(request)
     if body.authorization_id != authz_id:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "AUTHORIZATION_ID_MISMATCH")
-    try:
-        return _service().approve_change(
-            user_id=user.user_id,
-            authz_id=authz_id,
-            expected_envelope_hash=body.expected_envelope_hash,
-            assertion=body.assertion,
-        )
-    except MandateError as exc:
-        return _error(exc)
+    with stage(
+        "approval", user_id=user.user_id, attributes={**_MANDATE_OP, "authorization_id": authz_id}
+    ) as span:
+        try:
+            result = _service().approve_change(
+                user_id=user.user_id,
+                authz_id=authz_id,
+                expected_envelope_hash=body.expected_envelope_hash,
+                assertion=body.assertion,
+            )
+        except MandateError as exc:
+            status_ = "expired" if "EXPIRED" in exc.code else "rejected"
+            span.set_status(
+                "error" if exc.code == "COMMIT_FAILED" else status_, reason_code=exc.code
+            )
+            return _error(exc)
+        if isinstance(result, dict):
+            span.set_attributes({"approval_state": result.get("status")})
+        return result

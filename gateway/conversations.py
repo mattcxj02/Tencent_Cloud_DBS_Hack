@@ -399,8 +399,55 @@ class ConversationStore:
         """Common path for user-originated turns.
 
         Opens BEGIN IMMEDIATE, checks ownership + bounds, appends the turn,
-        bumps revision, supersedes, audits, commits.
+        bumps revision, supersedes, audits, commits. Each append is one ``ingest``
+        workflow span (a fresh trace in the conversation's session); its trace ID is
+        stored on the revision audit row. Turn text is never sent to telemetry.
         """
+        from gateway.telemetry import stage
+
+        with stage(
+            "ingest",
+            user_id=user_id,
+            conversation_id=conversation_id,
+            attributes={"conversation_id": conversation_id, "channel": role},
+        ) as span:
+            try:
+                result = self._user_append_locked(
+                    user_id,
+                    conversation_id,
+                    role,
+                    text,
+                    edits_turn_id=edits_turn_id,
+                    answers_question_id=answers_question_id,
+                )
+            except ContextLimitError:
+                span.set_status("rejected", reason_code=ContextLimitError.CODE)
+                raise
+            except (PermissionError, ValueError):
+                span.set_status("rejected", reason_code="CONVERSATION_NOT_FOUND")
+                raise
+            span.set_attributes(
+                {
+                    "turn_id": result["turn_id"],
+                    "turn_index": result["seq"],
+                    "conversation_revision": result["conversation_revision"],
+                }
+            )
+            if edits_turn_id is not None:
+                # A correction supersedes drafts/approvals bound to the old revision.
+                span.set_status("ok", reason_code="TRANSCRIPT_CORRECTED")
+            return result
+
+    def _user_append_locked(
+        self,
+        user_id: str,
+        conversation_id: str,
+        role: str,
+        text: str,
+        *,
+        edits_turn_id: str | None = None,
+        answers_question_id: str | None = None,
+    ) -> dict[str, Any]:
         conn = self._conn()
         try:
             conn.execute("BEGIN IMMEDIATE")

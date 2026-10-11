@@ -1,5 +1,5 @@
 # DCTA Makefile — common development targets
-.PHONY: reset-db test lint web-build dev seed demo eval smoke-llm smoke-asr smoke-langfuse smoke-validate smoke-telemetry smoke-extract \
+.PHONY: eval-fake operator reset-db test lint web-build dev seed demo eval smoke-llm smoke-asr smoke-langfuse smoke-validate smoke-telemetry smoke-extract smoke-voice \
        compose-build compose-up compose-down isolation-probe enroll-code
 
 # ── Development checks ──
@@ -44,7 +44,15 @@ demo:
 	@echo "Demo: pending T-11 (React confirmation, mandate, evidence views)"
 
 eval:
-	@echo "Eval: pending T-14 (golden set, Langfuse experiments)"
+	uv run python -m evals.run
+
+eval-fake:
+	uv run python -m evals.run --fake
+
+# Simulated phone for step-up codes: make operator ARGS='list' or ARGS='code <authz_id>'
+# (OPERATOR_TOKEN must be exported in your shell).
+operator:
+	uv run python scripts/operator_console.py $(ARGS)
 
 # ── Smoke checks ──
 
@@ -65,6 +73,9 @@ smoke-telemetry:
 
 smoke-extract:
 	uv run python scripts/smoke_extract.py
+
+smoke-voice:
+	uv run python scripts/smoke_voice.py
 
 # ── Compose (T-04 runtime isolation) ──
 COMPOSE := docker compose -f infra/compose.yaml --project-directory .

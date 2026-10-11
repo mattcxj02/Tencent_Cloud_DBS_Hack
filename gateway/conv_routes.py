@@ -3,7 +3,6 @@
 User routes (via ``require_user_session``, owner-checked):
     POST   /api/conversations                        create conversation
     POST   /api/conversations/{id}/text              append user_text turn
-    POST   /api/conversations/{id}/asr               append user_asr_final turn
     POST   /api/conversations/{id}/transcript-edit   append user_transcript_edit
     POST   /api/conversations/{id}/answer            append user_answer
     POST   /api/conversations/{id}/audio             upload audio evidence
@@ -18,6 +17,10 @@ Internal routes (delegation token):
 
 There is NO internal route to append user turns.  Agent credentials
 cannot create ``user_*`` roles by any path.
+
+There is no route that accepts a client-supplied ASR transcript:
+``user_asr_final`` turns are produced only by the gateway's own TRTC call in
+``POST /api/conversations/{id}/voice`` (``gateway/asr_routes.py``).
 """
 
 from __future__ import annotations
@@ -132,27 +135,6 @@ async def append_text_turn(
     store = get_conversation_store()
     try:
         result = store.append_text_turn(user.user_id, conversation_id, body.text)
-    except PermissionError:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="not found") from None
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from None
-    except ContextLimitError:
-        raise _context_limit_exc() from None
-    return result
-
-
-@router.post(
-    "/api/conversations/{conversation_id}/asr",
-    response_model=TurnResponse,
-)
-async def append_asr_turn(
-    conversation_id: str,
-    body: AppendTextRequest,
-    user: UserSession,
-) -> dict:
-    store = get_conversation_store()
-    try:
-        result = store.append_asr_final_turn(user.user_id, conversation_id, body.text)
     except PermissionError:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="not found") from None
     except ValueError as exc:

@@ -1,150 +1,105 @@
-import { useState } from 'react'
-import {
-  startRegistration,
-  startAuthentication,
-} from '@simplewebauthn/browser'
+// Passkey enrollment (one-time code from `make enroll-code`) and sign-in. The credential
+// that signs in is remembered for this tab so payment envelopes are bound to it.
+import { useRef, useState } from 'react'
+import type { FormEvent } from 'react'
+import { startRegistration } from '@simplewebauthn/browser'
+import { api, ApiError } from '../api'
+import { describeCode } from '../messages'
+import { PasskeyError, signWithPasskey } from '../passkey'
+import { useAnnounce, useSession } from '../session'
+import { Button, Card, Field, Notice, PageTitle, inputClass } from './ui'
 
-const API_BASE = '/api'
-
-export function Enroll() {
-  const [code, setCode] = useState('')
-  const [status, setStatus] = useState<string>('')
-  const [error, setError] = useState<string>('')
-
-  const enroll = async () => {
-    setStatus('Beginning enrollment…')
-    setError('')
-
-    try {
-      const beginResp = await fetch(`${API_BASE}/auth/enroll/begin`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code }),
-      })
-      if (!beginResp.ok) {
-        const data = await beginResp.json().catch(() => ({ detail: beginResp.statusText }))
-        throw new Error(data.detail || `HTTP ${beginResp.status}`)
-      }
-      const options = await beginResp.json()
-
-      setStatus('Waiting for authenticator…')
-      const attResp = await startRegistration({ optionsJSON: options })
-
-      setStatus('Verifying…')
-      const verifyResp = await fetch(`${API_BASE}/auth/enroll/verify`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ credential: attResp }),
-      })
-      if (!verifyResp.ok) {
-        const data = await verifyResp.json().catch(() => ({ detail: verifyResp.statusText }))
-        throw new Error(data.detail || `HTTP ${verifyResp.status}`)
-      }
-
-      const result = await verifyResp.json()
-      setStatus(`Enrolled as ${result.user_id}`)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
-      setStatus('')
-    }
+function registrationMessage(e: unknown): string {
+  const name = e instanceof Error ? e.name : ''
+  if (name === 'NotAllowedError' || name === 'AbortError') {
+    return 'Passkey setup was cancelled or timed out. Nothing was registered. Ask for a new enrollment code if this one was used.'
   }
-
-  return (
-    <section className="bg-white rounded-lg shadow p-4">
-      <h2 className="text-sm font-medium text-gray-600 mb-2">Enroll Device (WebAuthn)</h2>
-      <p className="text-xs text-gray-500 mb-3">
-        Enter your enrollment code to register a new authenticator.
-      </p>
-      <div className="flex gap-2">
-        <input
-          type="text"
-          value={code}
-          onChange={(e) => setCode(e.target.value)}
-          placeholder="Enrollment code"
-          className="flex-1 border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-        />
-        <button
-          onClick={enroll}
-          disabled={!code.trim()}
-          className="bg-blue-600 text-white rounded-lg px-4 py-2 text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
-        >
-          Enroll
-        </button>
-      </div>
-      {status && <p className="mt-2 text-sm text-blue-600">{status}</p>}
-      {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
-    </section>
-  )
+  if (name === 'InvalidStateError') return 'This device already has a passkey for this account. Sign in instead.'
+  if (e instanceof ApiError) return describeCode(e.code)
+  return 'Passkey setup failed. Please try again.'
 }
 
-export function SignIn() {
-  const [status, setStatus] = useState<string>('')
-  const [error, setError] = useState<string>('')
-  const [signedIn, setSignedIn] = useState(false)
+export function SignInPage() {
+  const { completeSignIn, notice } = useSession()
+  const announce = useAnnounce()
+  const [busy, setBusy] = useState<null | 'signin' | 'enroll'>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [enrolled, setEnrolled] = useState<string | null>(null)
+  const [code, setCode] = useState('')
+  const signInRef = useRef<HTMLButtonElement>(null)
 
   const signIn = async () => {
-    setStatus('Beginning login…')
-    setError('')
-
+    if (busy) return
+    setBusy('signin')
+    setError(null)
     try {
-      const beginResp = await fetch(`${API_BASE}/auth/login/begin`, {
-        method: 'POST',
-      })
-      if (!beginResp.ok) {
-        const data = await beginResp.json().catch(() => ({ detail: beginResp.statusText }))
-        throw new Error(data.detail || `HTTP ${beginResp.status}`)
-      }
-      const options = await beginResp.json()
-
-      setStatus('Waiting for authenticator…')
-      const asseResp = await startAuthentication({ optionsJSON: options })
-
-      setStatus('Verifying…')
-      const verifyResp = await fetch(`${API_BASE}/auth/login/verify`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ assertion: asseResp }),
-      })
-      if (!verifyResp.ok) {
-        const data = await verifyResp.json().catch(() => ({ detail: verifyResp.statusText }))
-        throw new Error(data.detail || `HTTP ${verifyResp.status}`)
-      }
-
-      const result = await verifyResp.json()
-      setStatus(`Signed in as ${result.user_id}`)
-      setSignedIn(true)
+      const options = await api.loginBegin()
+      const assertion = await signWithPasskey(options)
+      const result = await api.loginVerify(assertion)
+      announce('Signed in.')
+      await completeSignIn(result.user_id, assertion.id)
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
-      setStatus('')
+      if (e instanceof PasskeyError) setError(e.message)
+      else if (e instanceof ApiError && (e.status === 401 || e.status === 400)) {
+        setError("That passkey wasn't accepted. If this device was never enrolled, use an enrollment code below.")
+      } else setError(e instanceof ApiError ? describeCode(e.code) : 'Sign-in failed. Please try again.')
+    } finally {
+      setBusy(null)
     }
   }
 
-  const signOut = async () => {
-    await fetch(`${API_BASE}/auth/logout`, { method: 'POST' })
-    setStatus('')
-    setSignedIn(false)
+  const enroll = async (e: FormEvent) => {
+    e.preventDefault()
+    if (busy || !code.trim()) return
+    setBusy('enroll')
+    setError(null)
+    setEnrolled(null)
+    try {
+      const options = await api.enrollBegin(code.trim())
+      const credential = await startRegistration({ optionsJSON: options })
+      const result = await api.enrollVerify(credential)
+      setEnrolled(result.user_id)
+      setCode('')
+      announce('Passkey registered. Now sign in.')
+      window.setTimeout(() => signInRef.current?.focus(), 50)
+    } catch (err) {
+      setError(registrationMessage(err))
+    } finally {
+      setBusy(null)
+    }
   }
 
   return (
-    <section className="bg-white rounded-lg shadow p-4">
-      <h2 className="text-sm font-medium text-gray-600 mb-2">Sign In (WebAuthn)</h2>
-      {signedIn ? (
-        <button
-          onClick={signOut}
-          className="bg-gray-600 text-white rounded-lg px-4 py-2 text-sm font-medium hover:bg-gray-700"
-        >
-          Sign Out
-        </button>
-      ) : (
-        <button
-          onClick={signIn}
-          className="bg-blue-600 text-white rounded-lg px-4 py-2 text-sm font-medium hover:bg-blue-700"
-        >
-          Sign In
-        </button>
-      )}
-      {status && <p className="mt-2 text-sm text-blue-600">{status}</p>}
-      {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
-    </section>
+    <div className="space-y-4">
+      <PageTitle sub="Prototype on a simulated bank. Your passkey (Touch ID) stays on this device.">Sign in</PageTitle>
+      {notice && <Notice kind="warning" title={notice} />}
+      {error && <Notice kind="error" title={error} focus />}
+      {enrolled && <Notice kind="success" title={`Passkey registered for ${enrolled}. Now sign in.`} />}
+
+      <Card title="Sign in with your passkey" titleId="signin-heading">
+        <p className="mb-3 text-base">Use Touch ID or your device's passkey prompt.</p>
+        <Button ref={signInRef} onClick={() => void signIn()} busy={busy === 'signin'} busyLabel="Waiting for Touch ID…" disabled={busy !== null}>
+          Sign in with Touch ID / passkey
+        </Button>
+      </Card>
+
+      <Card title="First time on this device?" titleId="enroll-heading">
+        <form onSubmit={enroll} className="space-y-3">
+          <Field id="enroll-code" label="Enrollment code" hint="A one-time code from the bank (demo: make enroll-code).">
+            <input
+              id="enroll-code"
+              aria-describedby="enroll-code-hint"
+              className={`${inputClass} max-w-[20rem]`}
+              autoComplete="one-time-code"
+              value={code}
+              onChange={(e) => setCode(e.target.value)}
+            />
+          </Field>
+          <Button type="submit" variant="secondary" busy={busy === 'enroll'} busyLabel="Registering…" disabled={busy !== null || !code.trim()}>
+            Register a passkey
+          </Button>
+        </form>
+      </Card>
+    </div>
   )
 }

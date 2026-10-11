@@ -65,10 +65,12 @@ def interpret_reply(reply: LLMReply, request: ValidationRequest) -> VerdictPaylo
     if reply.has_tool_calls:
         return "LLM_UNEXPECTED_TOOL_CALL"
     content = (reply.content or "").strip()
-    if not content:
-        return "LLM_EMPTY_OUTPUT"
+    # Checked first: a reasoning model that spends the whole budget returns empty content
+    # with finish_reason "length", which is truncation, not a silent empty answer.
     if reply.finish_reason == "length":
         return "LLM_OUTPUT_TRUNCATED"
+    if not content:
+        return "LLM_EMPTY_OUTPUT"
     if reply.finish_reason != "stop":
         return "LLM_ABNORMAL_FINISH"
     if len(content) > MAX_OUTPUT_CHARS:

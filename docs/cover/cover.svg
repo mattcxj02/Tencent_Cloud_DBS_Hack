@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080" role="img" aria-labelledby="t d">
+  <title id="t">DCTA: Direct Conversational Transaction Agent</title>
+  <desc id="d">Cover image. Speak your payments. Verify every detail. Stay in control. DBS Track, Scenario 1. A diagram shows an AI zone with an agent that drafts and a validator that checks, both without payment tools, feeding a trusted gateway that pays only what the customer's passkey approved.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0B1F3A"/>
+      <stop offset="1" stop-color="#123761"/>
+    </linearGradient>
+    <marker id="arrow" viewBox="0 0 20 20" refX="10" refY="10" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+      <path d="M0 0 L20 10 L0 20 z" fill="#A9BCD6"/>
+    </marker>
+  </defs>
+
+  <rect width="1920" height="1080" fill="url(#bg)"/>
+
+  <g font-family="Inter, 'Helvetica Neue', 'Segoe UI', Arial, sans-serif">
+    <!-- Left column: name, blurb -->
+    <rect x="120" y="96" width="560" height="72" rx="36" fill="none" stroke="#2EC4B6" stroke-width="3"/>
+    <text x="400" y="144" text-anchor="middle" font-size="32" font-weight="700" letter-spacing="3" fill="#2EC4B6">DBS TRACK · SCENARIO 1</text>
+
+    <text x="110" y="410" font-size="230" font-weight="800" letter-spacing="4" fill="#FFFFFF">DCTA</text>
+    <text x="120" y="490" font-size="46" font-weight="500" fill="#A9BCD6">Direct Conversational</text>
+    <text x="120" y="548" font-size="46" font-weight="500" fill="#A9BCD6">Transaction Agent</text>
+
+    <text x="120" y="700" font-size="70" font-weight="700" fill="#FFFFFF">Speak your payments.</text>
+    <text x="120" y="790" font-size="70" font-weight="700" fill="#2EC4B6">Verify every detail.</text>
+    <text x="120" y="880" font-size="70" font-weight="700" fill="#FFB703">Stay in control.</text>
+
+    <text x="120" y="1000" font-size="28" font-weight="500" fill="#7F93B0">Tencent Cloud Hackathon 2026 · Simulated bank, synthetic data</text>
+
+    <!-- Right column: trust-zone motif -->
+    <rect x="1090" y="96" width="720" height="500" rx="28" fill="#FFFFFF" fill-opacity="0.04" stroke="#5B7398" stroke-width="3" stroke-dasharray="14 12"/>
+    <text x="1122" y="146" font-size="26" font-weight="700" letter-spacing="2" fill="#7F93B0">AI ZONE · NO PAYMENT TOOLS</text>
+
+    <rect x="1130" y="174" width="640" height="150" rx="22" fill="#163A66" stroke="#2EC4B6" stroke-width="3"/>
+    <text x="1170" y="240" font-size="50" font-weight="800" fill="#FFFFFF">AGENT</text>
+    <text x="1170" y="292" font-size="32" font-weight="500" fill="#A9BCD6">drafts from your words</text>
+
+    <line x1="1450" y1="326" x2="1450" y2="398" stroke="#A9BCD6" stroke-width="6" marker-end="url(#arrow)"/>
+
+    <rect x="1130" y="410" width="640" height="150" rx="22" fill="#163A66" stroke="#2EC4B6" stroke-width="3"/>
+    <text x="1170" y="476" font-size="50" font-weight="800" fill="#FFFFFF">VALIDATOR</text>
+    <text x="1170" y="528" font-size="32" font-weight="500" fill="#A9BCD6">checks the draft independently</text>
+
+    <line x1="1450" y1="562" x2="1450" y2="656" stroke="#A9BCD6" stroke-width="6" marker-end="url(#arrow)"/>
+
+    <rect x="1090" y="670" width="720" height="200" rx="28" fill="#FFFFFF"/>
+    <text x="1130" y="752" font-size="56" font-weight="800" fill="#0B1F3A">GATEWAY</text>
+    <text x="1130" y="812" font-size="32" font-weight="600" fill="#33507A">pays only what you approved</text>
+
+    <!-- Passkey badge: a key drawn from plain shapes -->
+    <circle cx="1700" cy="770" r="72" fill="#FFB703"/>
+    <circle cx="1668" cy="770" r="22" fill="none" stroke="#0B1F3A" stroke-width="11"/>
+    <rect x="1688" y="764" width="56" height="12" rx="3" fill="#0B1F3A"/>
+    <rect x="1722" y="772" width="9" height="20" rx="2" fill="#0B1F3A"/>
+    <rect x="1736" y="772" width="9" height="14" rx="2" fill="#0B1F3A"/>
+
+    <text x="1090" y="930" font-size="30" font-weight="500" fill="#A9BCD6">Your passkey signs the exact payment</text>
+  </g>
+</svg>

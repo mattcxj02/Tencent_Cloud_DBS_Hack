@@ -42,7 +42,9 @@ from gateway.drafts import (
     get_draft_store,
 )
 from gateway.identity_routes import _check_origin
+from gateway.telemetry import stage
 from shared.canonical import bundle_hash
+from shared.telemetry import extract_trace_context
 
 router = APIRouter(tags=["drafts"])
 
@@ -104,25 +106,48 @@ DraftFreezePrincipal = Annotated[Principal, Depends(require_principal("draft:fre
 def freeze_draft(
     body: FreezeDraftRequest,
     principal: DraftFreezePrincipal,
+    request: Request,
 ) -> dict[str, Any]:
-    """Freeze an agent proposal into an immutable draft bundle."""
+    """Freeze an agent proposal into an immutable draft bundle.
+
+    Traced as the gateway's ``compile`` stage, continuing the agent's validated
+    ``traceparent`` (correlation only; the token alone decides who may freeze)."""
     if principal.conversation_id != body.conversation_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="TOKEN_CONVERSATION_MISMATCH"
         )
     store = get_draft_store()
-    try:
-        bundle = store.freeze_draft(
-            user_id=principal.user_id,
-            conversation_id=body.conversation_id,
-            conversation_revision=body.conversation_revision,
-            legs=[leg.model_dump() for leg in body.legs],
+    with stage(
+        "compile",
+        user_id=principal.user_id,
+        conversation_id=body.conversation_id,
+        attributes={
+            "conversation_id": body.conversation_id,
+            "conversation_revision": body.conversation_revision,
+            "leg_count": len(body.legs),
+        },
+        parent=extract_trace_context(request.headers),
+    ) as span:
+        try:
+            bundle = store.freeze_draft(
+                user_id=principal.user_id,
+                conversation_id=body.conversation_id,
+                conversation_revision=body.conversation_revision,
+                legs=[leg.model_dump() for leg in body.legs],
+            )
+        except DraftError as exc:
+            code = str(exc)
+            span.set_status(
+                "superseded" if code == "STALE_CONVERSATION_REVISION" else "rejected",
+                reason_code=code,  # free-text messages fail the reason-code check and drop
+            )
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=code,
+            ) from None
+        span.set_attributes(
+            {"bundle_id": str(bundle.bundle_id), "bundle_hash": bundle_hash(bundle)}
         )
-    except DraftError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(exc),
-        ) from None
 
     return {
         "bundle_id": str(bundle.bundle_id),

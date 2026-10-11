@@ -139,6 +139,27 @@ def _parse_amount_expr(raw_leg: dict[str, Any]) -> AmountExpr | Money:
     raise DraftError("AMOUNT_EXPR_INVALID")
 
 
+def _checked_reference(
+    conn: sqlite3.Connection, turns: TurnIndex, user_id: str, raw_leg: dict[str, Any]
+) -> str | None:
+    """A leg reference is shown on the confirmation and signed, so it must come from the
+    user: either their own words (a whole phrase in a current user turn) or the bill
+    reference they saved for that biller. Model-authored reference text is refused."""
+    reference = (raw_leg.get("reference") or "").strip() or None
+    if reference is None:
+        return None
+    if turns.user_said(reference):
+        return reference
+    if raw_leg.get("action") == "pay_bill":
+        row = conn.execute(
+            "SELECT bill_reference FROM saved_billers WHERE user_id = ? AND biller_id = ?",
+            (user_id, raw_leg.get("target_id")),
+        ).fetchone()
+        if row is not None and row["bill_reference"] and row["bill_reference"] == reference:
+            return reference
+    raise DraftError("REFERENCE_NOT_FROM_USER")
+
+
 # ── DraftStore ────────────────────────────────────────────────────────
 
 
@@ -188,9 +209,9 @@ class DraftStore:
         from shared.schemas import MAX_LEGS
 
         if not legs:
-            raise DraftError("bundle must have at least one leg")
+            raise DraftError("LEGS_INVALID")
         if len(legs) > MAX_LEGS:
-            raise DraftError(f"bundle exceeds {MAX_LEGS} legs")
+            raise DraftError("TOO_MANY_LEGS")
 
         conn = self._conn()
         try:
@@ -203,9 +224,9 @@ class DraftStore:
                 (conversation_id,),
             ).fetchone()
             if conv_row is None:
-                raise DraftError(f"conversation not found: {conversation_id}")
+                raise DraftError("CONVERSATION_NOT_FOUND")
             if conv_row["owner_user_id"] != user_id:
-                raise DraftError("conversation not owned by user")
+                raise DraftError("CONVERSATION_NOT_FOUND")
 
             conv_revision = int(conv_row["revision"])
             conv_hash = conv_row["conversation_hash"]
@@ -230,14 +251,14 @@ class DraftStore:
             for raw_leg in legs:
                 leg_id = raw_leg.get("leg_id", "")
                 if not leg_id:
-                    raise DraftError("leg_id is required")
+                    raise DraftError("LEG_INVALID")
                 source_acct = raw_leg.get("source_account_id", "")
                 if not source_acct:
-                    raise DraftError("source_account_id is required")
+                    raise DraftError("LEG_INVALID")
 
                 # Validate source account ownership.
                 if source_acct not in acct_map:
-                    raise DraftError(f"source account {source_acct!r} not owned by user")
+                    raise DraftError("SOURCE_ACCOUNT_NOT_OWNED")
 
                 # Determine amount expression (malformed input → AMOUNT_EXPR_INVALID).
                 try:
@@ -259,9 +280,12 @@ class DraftStore:
             for i, raw_leg in enumerate(legs):
                 leg_id = raw_leg["leg_id"]
                 source_acct = raw_leg["source_account_id"]
-                action = Action(raw_leg["action"])
-                target_type = raw_leg["target_type"]
-                target_id = raw_leg["target_id"]
+                try:
+                    action = Action(raw_leg["action"])
+                    target_type = raw_leg["target_type"]
+                    target_id = raw_leg["target_id"]
+                except (KeyError, ValueError):
+                    raise DraftError("LEG_INVALID") from None
                 amount = resolved_amounts[i]
 
                 # Validate target ownership.
@@ -297,34 +321,42 @@ class DraftStore:
                     list(lineage.parent_refs) if parents is not None else [lineage.source_refs[0]]
                 )
 
-                leg = Leg(
-                    leg_id=leg_id,
-                    action=action,
-                    source_account_id=source_acct,
-                    target_type=target_type,
-                    target_id=target_id,
-                    display_metadata=display_meta,
-                    # For equities the debit is the whole-share cost, not the budget.
-                    amount=equity_terms.actual_debit if equity_terms else amount,
-                    reference=raw_leg.get("reference"),
-                    equity_terms=equity_terms,
-                    lineage=lineage,
-                )
+                reference = _checked_reference(conn, turns, user_id, raw_leg)
+
+                try:
+                    leg = Leg(
+                        leg_id=leg_id,
+                        action=action,
+                        source_account_id=source_acct,
+                        target_type=target_type,
+                        target_id=target_id,
+                        display_metadata=display_meta,
+                        # For equities the debit is the whole-share cost, not the budget.
+                        amount=equity_terms.actual_debit if equity_terms else amount,
+                        reference=reference,
+                        equity_terms=equity_terms,
+                        lineage=lineage,
+                    )
+                except ValueError:  # schema rules, e.g. a transfer aimed at a biller
+                    raise DraftError("LEG_INVALID") from None
                 resolved_legs.append(leg)
 
             # ── Build FrozenBundle ──
             bundle_id = uuid.uuid4()
             now = utcnow()
-            bundle = FrozenBundle(
-                bundle_id=bundle_id,
-                revision=1,
-                owner_user_id=user_id,
-                conversation_id=conversation_id,
-                conversation_revision=conv_revision,
-                conversation_hash=conv_hash,
-                created_at=to_iso(now),
-                legs=resolved_legs,
-            )
+            try:
+                bundle = FrozenBundle(
+                    bundle_id=bundle_id,
+                    revision=1,
+                    owner_user_id=user_id,
+                    conversation_id=conversation_id,
+                    conversation_revision=conv_revision,
+                    conversation_hash=conv_hash,
+                    created_at=to_iso(now),
+                    legs=resolved_legs,
+                )
+            except ValueError:  # e.g. duplicate leg IDs
+                raise DraftError("LEG_INVALID") from None
 
             # ── Store immutable canonical bytes ──
             cb = canonical_bytes(bundle)
@@ -404,6 +436,86 @@ class DraftStore:
         bundle_id: str,
         credential_id: str,
     ) -> tuple[SigningEnvelope, str]:
+        """Issue the signing envelope (see :meth:`_create_authorization`), traced as the
+        ``challenge`` stage. The span closes before the user is asked to approve; a
+        zero-duration ``awaiting_approval`` event marks the hand-off to the person."""
+        from gateway.telemetry import event, stage
+
+        conversation_id = self._draft_conversation(bundle_id, user_id)
+        if conversation_id is None:  # unknown or another user's draft: 404, not traced
+            return self._create_authorization(
+                user_id=user_id, bundle_id=bundle_id, credential_id=credential_id
+            )
+        with stage(
+            "challenge",
+            user_id=user_id,
+            conversation_id=conversation_id,
+            attributes={"bundle_id": bundle_id, "operation_type": "execute_bundle"},
+        ) as span:
+            try:
+                envelope, authz_id = self._create_authorization(
+                    user_id=user_id, bundle_id=bundle_id, credential_id=credential_id
+                )
+            except ApprovalError as exc:
+                code = _error_code(exc)
+                status = {"POLICY_BLOCK": "blocked", "QUOTE_EXPIRED": "expired"}.get(
+                    code, "rejected"
+                )
+                span.set_status(status, reason_code=code)
+                raise
+            bundle = envelope.payload
+            span.set_attributes(
+                {
+                    "authorization_id": authz_id,
+                    "envelope_hash": approval_challenge_hex(envelope),
+                    "conversation_id": envelope.conversation_id,
+                    "conversation_revision": envelope.conversation_revision,
+                    "mandate_version": envelope.active_mandate_version,
+                    "leg_count": len(bundle.legs),
+                    "amount": _total(bundle).to_str(),
+                    "currency": "SGD",
+                    "linked_trace_id": self._validation_trace_id(bundle_id),
+                }
+            )
+            event("awaiting_approval", attributes={"authorization_id": authz_id})
+            return envelope, authz_id
+
+    def _draft_conversation(self, bundle_id: str, user_id: str) -> str | None:
+        """The draft's conversation (telemetry session only; never an authorization)."""
+        conn = self._conn()
+        try:
+            row = conn.execute(
+                "SELECT conversation_id FROM frozen_drafts WHERE bundle_id = ? "
+                "AND owner_user_id = ?",
+                (bundle_id, user_id),
+            ).fetchone()
+            return row["conversation_id"] if row is not None else None
+        except Exception:  # noqa: BLE001 - correlation lookup only
+            return None
+        finally:
+            conn.close()
+
+    def _validation_trace_id(self, bundle_id: str) -> str | None:
+        """Trace of the bundle's current validation, linked from the challenge trace."""
+        conn = self._conn()
+        try:
+            row = conn.execute(
+                "SELECT trace_id FROM validation_results WHERE bundle_id = ? AND state = 'CURRENT'",
+                (bundle_id,),
+            ).fetchone()
+            return row["trace_id"] if row is not None else None
+        except Exception:  # noqa: BLE001 - correlation lookup only
+            return None
+        finally:
+            conn.close()
+
+    def _create_authorization(
+        self,
+        *,
+        user_id: str,
+        bundle_id: str,
+        credential_id: str,
+    ) -> tuple[SigningEnvelope, str]:
         """Issue the server-generated signing envelope for a frozen draft.
 
         Fails closed unless the draft is ``DRAFT_FROZEN`` at the conversation's
@@ -416,7 +528,6 @@ class DraftStore:
         Returns ``(envelope, authorization_id)``.
         """
         from gateway.approval.hooks import (
-            _call_policy_precheck,
             _call_semantic_validation_passed,
         )
         from gateway.audit import append_audit
@@ -484,7 +595,7 @@ class DraftStore:
                 expires_at=to_iso(now + timedelta(seconds=ttl)),
             )
 
-            policy = _call_policy_precheck(conn, envelope)
+            policy = _traced_precheck(conn, envelope)
             if policy.decision not in ("PASS", "STEP_UP"):
                 raise ApprovalError("POLICY_BLOCK", _codes(policy))
 
@@ -587,6 +698,54 @@ class DraftStore:
         expected_envelope_hash: str,
         assertion: dict[str, Any],
     ) -> dict[str, Any]:
+        """Verify and hand off (see :meth:`_approve_authorization`), traced as the
+        ``approval`` stage with nested ``policy``, ``step_up`` and ``execution`` spans.
+        Only stable codes reach telemetry; the assertion never does."""
+        from gateway.telemetry import stage
+
+        authz = self.get_authorization(authz_id, user_id)
+        if authz is None:  # unknown or another user's authorization: 404, not traced
+            raise ApprovalError("AUTHORIZATION_NOT_FOUND")
+        with stage(
+            "approval",
+            user_id=user_id,
+            conversation_id=authz["conversation_id"],
+            attributes={
+                "authorization_id": authz_id,
+                "bundle_id": authz["bundle_id"],
+                "operation_type": "execute_bundle",
+            },
+        ) as span:
+            try:
+                result = self._approve_authorization(
+                    user_id=user_id,
+                    authz_id=authz_id,
+                    expected_envelope_hash=expected_envelope_hash,
+                    assertion=assertion,
+                )
+            except ApprovalError as exc:
+                code = _error_code(exc)
+                span.set_status(_APPROVAL_ERROR_STATUS.get(code, "rejected"), reason_code=code)
+                raise
+            outcome = result.get("status")
+            codes = result.get("reason_codes") or []
+            span.set_attributes({"approval_state": outcome})
+            if outcome == "AWAITING_STEP_UP":
+                span.set_status("pending", reason_code=codes[0] if codes else "STEP_UP_REQUIRED")
+            elif outcome == "BLOCKED":
+                span.set_status("blocked", reason_code=codes[0] if codes else "POLICY_BLOCK")
+            elif result.get("replayed"):
+                span.set_status("ok", reason_code="RECEIPT_REPLAYED")
+            return result
+
+    def _approve_authorization(
+        self,
+        *,
+        user_id: str,
+        authz_id: str,
+        expected_envelope_hash: str,
+        assertion: dict[str, Any],
+    ) -> dict[str, Any]:
         """Verify a WebAuthn assertion against the STORED envelope and hand off.
 
         Order: ownership and operation; expected hash; an already COMMITTED
@@ -607,7 +766,6 @@ class DraftStore:
 
         from gateway.approval.hooks import (
             _call_commit_authorization,
-            _call_policy_precheck,
             _call_semantic_validation_passed,
         )
         from gateway.audit import append_audit
@@ -765,6 +923,9 @@ class DraftStore:
                 },
             )
             conn.commit()
+            from gateway.telemetry import event
+
+            event("approval.signature_verified", attributes={"authorization_id": authz_id})
         except _CommittedMeanwhile:
             conn.rollback()
         except Exception:
@@ -789,7 +950,7 @@ class DraftStore:
             if not _call_semantic_validation_passed(conn, envelope.payload):
                 decision, codes = "BLOCK", ("SEMANTIC_VALIDATION_REQUIRED",)
             else:
-                policy = _call_policy_precheck(conn, envelope)
+                policy = _traced_precheck(conn, envelope)
                 decision, codes = policy.decision, _codes(policy)
         finally:
             conn.close()
@@ -853,9 +1014,14 @@ class DraftStore:
                 (to_status, ",".join(reason_codes) or None, authz_id, user_id, from_status),
             )
             if cur.rowcount:
+                row = conn.execute(
+                    "SELECT conversation_id FROM authorizations WHERE authorization_id = ?",
+                    (authz_id,),
+                ).fetchone()
                 append_audit(
                     conn,
                     source="gateway",
+                    conversation_id=row["conversation_id"] if row is not None else None,
                     user_id=user_id,
                     step=f"gateway.authorization.{to_status.lower()}",
                     payload={"authorization_id": authz_id, "reason_codes": list(reason_codes)},
@@ -939,6 +1105,43 @@ def _set_draft_store(store: DraftStore | None) -> None:
 # ── Private helpers ────────────────────────────────────────────────────
 
 
+#: Telemetry status of approval errors (expected outcomes are not errors).
+_APPROVAL_ERROR_STATUS: dict[str, str] = {
+    "AUTHORIZATION_EXPIRED": "expired",
+    "AUTHORIZATION_SUPERSEDED": "superseded",
+    "POLICY_BLOCK": "blocked",
+    "COMMIT_FAILED": "error",
+    "COMMIT_NOT_IMPLEMENTED": "error",
+}
+
+
+def _error_code(exc: Exception) -> str:
+    """The stable code of an ApprovalError ("NOT_PENDING: BLOCKED" → "NOT_PENDING")."""
+    return str(exc).split(":", 1)[0].strip()
+
+
+def _total(bundle: FrozenBundle) -> Money:
+    """Total debit of a bundle, summed in cents."""
+    from ledger.schema import cents_to_money, money_to_cents
+
+    return cents_to_money(sum(money_to_cents(leg.amount) for leg in bundle.legs))
+
+
+def _traced_precheck(conn: sqlite3.Connection, envelope: SigningEnvelope) -> Any:
+    """The policy pre-check hook inside a ``policy`` span (decision and reason codes).
+    The enclosing ``challenge`` or ``approval`` span tells which pre-check it was."""
+    from gateway.approval.hooks import _call_policy_precheck
+    from gateway.telemetry import record_policy, stage
+
+    with stage(
+        "policy",
+        attributes={"bundle_id": envelope.operation_id, "operation_type": envelope.operation},
+    ) as span:
+        policy = _call_policy_precheck(conn, envelope)
+        record_policy(span, policy.decision, _codes(policy))
+        return policy
+
+
 def _codes(policy: Any) -> tuple[str, ...]:
     """Stable reason codes of a PolicyOutcome (falls back to its ``reason`` string)."""
     codes = tuple(getattr(policy, "reason_codes", ()) or ())
@@ -982,7 +1185,7 @@ def _validate_target(
     if tt == TargetType.own_account:
         acct = bank_store.get_account(user_id, target_id)
         if acct is None:
-            raise DraftError(f"target account {target_id!r} not owned by user")
+            raise DraftError("TARGET_ACCOUNT_NOT_OWNED")
     elif tt in (TargetType.saved_payee, TargetType.saved_paynow):
         payees = bank_store.search_payees(user_id, target_id)
         # Exact ID match check.
@@ -994,7 +1197,7 @@ def _validate_target(
                 (target_id, user_id),
             ).fetchone()
             if row is None:
-                raise DraftError(f"target payee {target_id!r} not found")
+                raise DraftError("PAYEE_NOT_SAVED")
     elif tt == TargetType.biller:
         row = conn.execute(
             "SELECT b.biller_id FROM saved_billers sb "
@@ -1003,19 +1206,19 @@ def _validate_target(
             (user_id, target_id),
         ).fetchone()
         if row is None:
-            raise DraftError(f"target biller {target_id!r} not saved by user")
+            raise DraftError("BILLER_NOT_SAVED")
     elif tt == TargetType.owned_card:
         card = bank_store.get_card(user_id, target_id)
         if card is None:
-            raise DraftError(f"target card {target_id!r} not owned by user")
+            raise DraftError("CARD_NOT_OWNED")
     elif tt == TargetType.sgx_symbol:
         # Target is a symbol like "D05"; validate it exists in mock prices.
         from gateway.bank import MOCK_PRICES
 
         if target_id.upper() not in MOCK_PRICES:
-            raise DraftError(f"unknown equity symbol: {target_id!r}")
+            raise DraftError("UNKNOWN_SYMBOL")
     else:
-        raise DraftError(f"unknown target type: {target_type!r}")
+        raise DraftError("UNKNOWN_TARGET_TYPE")
 
 
 def _resolve_display_metadata(
@@ -1086,11 +1289,11 @@ def _compute_equity_terms(
     eq = raw_leg.get("equity_terms", {})
     quote_id = eq.get("quote_id", "")
     if not quote_id:
-        raise DraftError("equity_terms.quote_id is required for buy_equity")
+        raise DraftError("QUOTE_REQUIRED")
 
     quote = bank_store.fetch_quote(quote_id)
     if quote is None:
-        raise DraftError(f"quote {quote_id!r} not found")
+        raise DraftError("QUOTE_NOT_FOUND")
     if quote["symbol"].upper() != str(raw_leg["target_id"]).upper():
         raise DraftError("QUOTE_SYMBOL_MISMATCH")
     if from_iso(quote["expires_at"]) <= utcnow():
@@ -1100,7 +1303,7 @@ def _compute_equity_terms(
     budget = amount  # The leg amount IS the budget.
     quantity = int(budget.value // unit_price.value)
     if quantity < 1:
-        raise DraftError("quantity < 1 — budget insufficient for one share")
+        raise DraftError("EQUITY_QUANTITY_ZERO")
     actual_debit = Money(unit_price.value * quantity)
     residual = Money(budget.value - actual_debit.value)
 

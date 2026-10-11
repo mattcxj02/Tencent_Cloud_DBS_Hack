@@ -154,14 +154,70 @@ def commit(
     the policy recheck and the commit are one atomic unit.  There is no
     boolean "already verified" switch.
     """
-    conn, owned = _open(db)
-    try:
-        return _commit(
-            conn, str(authz["authorization_id"]), str(authz["user_id"]), now, step_up_proof
-        )
-    finally:
-        if owned:
-            conn.close()
+    from gateway.telemetry import stage
+
+    authz_id, user_id = str(authz["authorization_id"]), str(authz["user_id"])
+    with stage(
+        "execution",
+        attributes={
+            "authorization_id": authz_id,
+            "operation_type": OPERATION,
+            "step_up_required": step_up_proof is not None,
+        },
+    ) as span:
+        conn, owned = _open(db)
+        try:
+            receipt = _commit(conn, authz_id, user_id, now, step_up_proof)
+        except ExecutionRefused as exc:
+            refusal_status, reason = _refusal_status(exc)
+            span.set_status(refusal_status, reason_code=reason)
+            raise
+        except ExecutionFailed:
+            span.set_status("error", reason_code="COMMIT_FAILED")
+            raise
+        finally:
+            if owned:
+                conn.close()
+        span.set_attributes({"approval_state": receipt.status})
+        _trace_receipt(receipt)
+        return receipt
+
+
+def _refusal_status(exc: ExecutionRefused) -> tuple[str, str | None]:
+    """Telemetry status of a refused commit: expected outcomes, not crashes."""
+    status = {
+        "BLOCKED": "blocked",
+        "EXPIRED": "expired",
+        "SUPERSEDED": "superseded",
+        "CANCELLED": "cancelled",
+        "AWAITING_STEP_UP": "pending",
+    }.get(exc.status or "", "rejected")
+    if exc.code == "STEP_UP_CODE_INVALID":
+        status = "rejected"
+    reason = exc.reason_codes[0] if status == "blocked" and exc.reason_codes else exc.code
+    return status, reason
+
+
+def _trace_receipt(receipt: Receipt) -> None:
+    """A short ``receipt`` span: what was committed (or replayed), no account numbers."""
+    from gateway.telemetry import stage
+
+    details = receipt.details or {}
+    total = details.get("total_debit")
+    with stage(
+        "receipt",
+        attributes={
+            "authorization_id": receipt.authorization_id,
+            "bundle_id": details.get("operation_id"),
+            "envelope_hash": details.get("envelope_hash"),
+            "leg_count": len(details.get("legs") or []),
+            "amount": total if isinstance(total, str) else None,
+            "currency": "SGD",
+            "step_up_required": bool(details.get("step_up_verified")),
+        },
+    ) as span:
+        if receipt.replayed:
+            span.set_status("ok", reason_code="RECEIPT_REPLAYED")
 
 
 def load_receipt(conn: sqlite3.Connection, authorization_id: str, user_id: str) -> Receipt | None:
@@ -331,7 +387,14 @@ def _commit_locked(
         _transition(conn, row, envelope, status, "BLOCKED", codes)
         raise _Refusal("POLICY_BLOCK", status="BLOCKED", reason_codes=codes, persist=True)
 
-    outcome = evaluate(conn, envelope, now)
+    from gateway.telemetry import record_policy, stage
+
+    with stage(
+        "policy",
+        attributes={"bundle_id": envelope.operation_id, "operation_type": OPERATION},
+    ) as policy_span:
+        outcome = evaluate(conn, envelope, now)
+        record_policy(policy_span, outcome.decision, outcome.reason_codes)
     if outcome.decision not in (PASS, STEP_UP):
         codes = outcome.reason_codes or ("POLICY_UNKNOWN_DECISION",)
         _transition(conn, row, envelope, status, "BLOCKED", codes)

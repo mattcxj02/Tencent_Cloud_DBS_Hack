@@ -463,8 +463,32 @@ def enter_step_up(
     """``PENDING_APPROVAL`` → ``AWAITING_STEP_UP`` with its one challenge, atomically.
 
     Used when the post-signature policy pre-check asks for step-up.  Returns
-    ``False`` (and changes nothing) if the authorization is not pending.
+    ``False`` (and changes nothing) if the authorization is not pending.  Traced as a
+    ``step_up`` span with status ``pending``; it closes before the user reads the code.
     """
+    from gateway.telemetry import stage
+
+    with stage(
+        "step_up",
+        attributes={
+            "authorization_id": authorization_id,
+            "step_up_required": True,
+            "channel": "simulated",
+        },
+    ) as span:
+        entered = _enter_step_up(db_path, authorization_id, user_id, reason_codes)
+        if entered:
+            span.set_status(
+                "pending", reason_code=reason_codes[0] if reason_codes else "STEP_UP_REQUIRED"
+            )
+        else:
+            span.set_status("rejected", reason_code="NOT_PENDING")
+        return entered
+
+
+def _enter_step_up(
+    db_path: str, authorization_id: str, user_id: str, reason_codes: tuple[str, ...]
+) -> bool:
     conn = connect(db_path)
     try:
         conn.execute("BEGIN IMMEDIATE")
@@ -485,6 +509,7 @@ def enter_step_up(
         append_audit(
             conn,
             source="gateway",
+            conversation_id=row["conversation_id"],
             user_id=user_id,
             step="gateway.authorization.awaiting_step_up",
             payload={"authorization_id": authorization_id, "reason_codes": list(reason_codes)},
@@ -507,6 +532,17 @@ def enter_step_up(
         raise
     finally:
         conn.close()
+
+
+def _step_up_error_status(exc: StepUpError) -> str:
+    """Telemetry status of a step-up refusal (wrong code / expiry are expected)."""
+    if exc.code == "COMMIT_FAILED":
+        return "error"
+    if "EXPIRED" in exc.code or exc.status == "EXPIRED":
+        return "expired"
+    if exc.status == "BLOCKED":
+        return "blocked"
+    return "rejected"
 
 
 # ── Service (routes call this) ─────────────────────────────────────
@@ -562,12 +598,47 @@ class StepUpService:
         code: str,
         expected_envelope_hash: str | None = None,
     ) -> dict[str, Any]:
-        """Verify *code* and commit in one transaction (see the module docstring)."""
+        """Verify *code* and commit in one transaction (see the module docstring).
+
+        Traced as a ``step_up`` span (nested ``execution``/``policy``/``receipt``); only
+        stable codes are recorded, never the code the user typed.
+        """
+        from gateway.telemetry import stage
+
         conn = self._conn()
         try:
             authz = self._owned(conn, authz_id, user_id)
         finally:
             conn.close()
+        with stage(
+            "step_up",
+            user_id=user_id,
+            conversation_id=authz["conversation_id"],
+            attributes={
+                "authorization_id": authz_id,
+                "step_up_required": True,
+                "channel": "simulated",
+            },
+        ) as span:
+            try:
+                result = self._submit(authz, user_id, authz_id, code, expected_envelope_hash)
+            except StepUpError as exc:
+                span.set_status(_step_up_error_status(exc), reason_code=exc.code)
+                raise
+            span.set_attributes({"approval_state": result.get("status")})
+            if result.get("status") == "BLOCKED":
+                codes = result.get("reason_codes") or []
+                span.set_status("blocked", reason_code=codes[0] if codes else "POLICY_BLOCK")
+            return result
+
+    def _submit(
+        self,
+        authz: sqlite3.Row,
+        user_id: str,
+        authz_id: str,
+        code: str,
+        expected_envelope_hash: str | None,
+    ) -> dict[str, Any]:
         if authz["operation"] != "execute_bundle":
             raise StepUpError("OPERATION_MISMATCH")
         if expected_envelope_hash is not None and not hmac.compare_digest(

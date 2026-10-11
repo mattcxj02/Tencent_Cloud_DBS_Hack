@@ -6,7 +6,8 @@ untrusted; this module checks them deterministically against gateway-held data:
 
 - the cited turn belongs to the conversation, is user-originated (never an
   ``app_question``) and has not been replaced by a later transcript edit;
-- ``validate_span`` proves the quoted words sit at that location (location only);
+- ``validate_span`` proves the quoted words sit at that location (location only), and
+  the span must be whole words: "Mum" cut out of "Mumbai" is not a citation;
 - the target and source words must match the bank's own name, alias, account type
   or masked suffix for exactly one of the user's records of that kind, so "John"
   alone cannot select John Doe when John Tan also exists;
@@ -98,12 +99,37 @@ class TurnIndex:
             raise EvidenceError("EVIDENCE_TURN_INVALID")
         if not span.text.strip() or not validate_span(turn.text, span.start, span.end, span.text):
             raise EvidenceError("EVIDENCE_SPAN_MISMATCH")
+        if not _whole_words(turn.text, span.start, span.end):
+            # A fragment of a longer word ("Mum" in "Mumbai", "900" in "INV9001") is not
+            # what the user said. Same rule as the agent's own citations (T-13 finding).
+            raise EvidenceError("EVIDENCE_SPAN_MISMATCH")
         if turn.role == "user_answer":
             return build_user_selection_ref(turn.turn_id, span.start, span.end)
         return build_user_turn_ref(turn.turn_id, span.start, span.end)
 
     def turn_text(self, turn_id: str) -> str:
         return self._turns[turn_id].text
+
+    def user_said(self, phrase: str) -> bool:
+        """True if *phrase* appears as whole words in a current user-originated turn."""
+        needle = phrase.casefold()
+        for turn in self._turns.values():
+            if turn.role not in USER_ROLES:
+                continue
+            text = turn.text.casefold()
+            pos = text.find(needle)
+            while pos != -1:
+                if _whole_words(turn.text, pos, pos + len(needle)):
+                    return True
+                pos = text.find(needle, pos + 1)
+        return False
+
+
+def _whole_words(text: str, start: int, end: int) -> bool:
+    """The span neither starts nor ends inside a word (``agent.turns._word_bounded``)."""
+    if text[start].isalnum() and start > 0 and text[start - 1].isalnum():
+        return False
+    return not (text[end - 1].isalnum() and end < len(text) and text[end].isalnum())
 
 
 def _normalize(text: str) -> str:

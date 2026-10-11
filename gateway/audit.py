@@ -125,6 +125,20 @@ def _row_contents_for_hash(
     return canonical_bytes(contents)
 
 
+def _active_trace_ids() -> tuple[str | None, str | None]:
+    """Trace and span IDs of the active OpenTelemetry span (None, None when tracing is
+    off). Correlation only: never used to authorize anything; never raises."""
+    try:
+        from opentelemetry import trace as otel_trace
+
+        ctx = otel_trace.get_current_span().get_span_context()
+        if ctx.is_valid:
+            return f"{ctx.trace_id:032x}", f"{ctx.span_id:016x}"
+    except Exception:  # noqa: BLE001 - telemetry must never block an audit write
+        pass
+    return None, None
+
+
 def append_audit(
     conn: sqlite3.Connection,
     *,
@@ -142,12 +156,19 @@ def append_audit(
     Reads the tail (max seq + prev_hash) under the same lock, computes
     the new ``row_hash``, and inserts.  Returns the new ``seq``.
 
+    Gateway rows without explicit IDs take the trace/span IDs of the active
+    gateway workflow span, so audit rows and Langfuse observations correlate.
+    Agent-reported rows keep the IDs the agent supplied (or none).
+
     **Must not be called outside a write transaction.**  The caller
     opens ``BEGIN IMMEDIATE``, writes its data + audit, then commits or
     rolls back together.
     """
     if not conn.in_transaction:
         raise RuntimeError("append_audit must run inside the caller's BEGIN IMMEDIATE transaction")
+    if source == "gateway" and trace_id is None and span_id is None:
+        # Correlate gateway decisions with the active gateway workflow span (T-08).
+        trace_id, span_id = _active_trace_ids()
     ts = to_iso(now_utc())
 
     # Canonical payload JSON: sorted keys, Money as 2-dp strings, floats rejected.

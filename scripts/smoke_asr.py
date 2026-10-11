@@ -96,7 +96,7 @@ def main() -> None:
 
     wav_size = wav_path.stat().st_size
     print(f"Generated: {wav_path} ({wav_size} bytes)")
-    print(f"Prompt text: \"{text}\"")
+    print(f'Prompt text: "{text}"')
 
     # ── Step 2: Send to TRTC ASR ──
     print("\n--- Step 2: Send WAV to TRTC ASR ---")

@@ -62,7 +62,7 @@ src = ["agent", "validator", "gateway", "ledger", "shared", "tests", "evals"]
 select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["agent", "validator", "gateway", "ledger", "shared"]
+known-first-party = ["agent", "validator", "gateway", "ledger", "shared", "evals"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["B011"]

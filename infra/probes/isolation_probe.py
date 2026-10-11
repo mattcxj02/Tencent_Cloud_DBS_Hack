@@ -89,16 +89,20 @@ def expect_succeed(label: str, fn, *args, **kwargs):
 
 # ── Check 1: Ledger file access ──────────────────────────────────────
 
+
 def check_ledger_file():
     """Try to open /data/dcta.db for read and write."""
+
     def try_read():
         with open("/data/dcta.db") as f:
             f.read(1)
+
     expect_denied("open /data/dcta.db for read", try_read)
 
     def try_write():
         with open("/data/dcta.db", "a") as f:
             f.write("")
+
     expect_denied("open /data/dcta.db for write", try_write)
 
     # Search for any .db file on the filesystem
@@ -115,31 +119,39 @@ def check_ledger_file():
         if found:
             raise RuntimeError(f"found db files: {found}")
         return "no db files found"
+
     expect_succeed("no *.db files in container", find_db_files)
 
 
 # ── Check 2: Import gateway/ledger ────────────────────────────────────
 
+
 def check_imports():
     """Try to import gateway and ledger — should be ModuleNotFoundError."""
+
     def try_import_gateway():
         import gateway  # noqa: F401
+
     expect_denied("import gateway", try_import_gateway)
 
     def try_import_ledger():
         import ledger  # noqa: F401
+
     expect_denied("import ledger", try_import_ledger)
 
     def try_import_gateway_app():
         from gateway import app  # noqa: F401
+
     expect_denied("import gateway.app", try_import_gateway_app)
 
     def try_import_ledger_schema():
         from ledger import schema  # noqa: F401
+
     expect_denied("import ledger.schema", try_import_ledger_schema)
 
 
 # ── Check 3: Write to application code directory and / ────────────────
+
 
 def check_write_protection():
     """Write to app code dir and / — should be permission denied or read-only."""
@@ -147,18 +159,22 @@ def check_write_protection():
 
     for code_dir in app_dirs:
         test_file = os.path.join(code_dir, ".isolation_probe_write_test")
+
         def try_write_code_dir(d=test_file):
             with open(d, "w") as f:
                 f.write("test")
+
         expect_denied(f"write to {code_dir}", try_write_code_dir)
 
     def try_write_root():
         with open("/.isolation_probe_write_test", "w") as f:
             f.write("test")
+
     expect_denied("write to /", try_write_root)
 
 
 # ── Check 4: Docker socket absent ─────────────────────────────────────
+
 
 def check_docker_socket():
     """/var/run/docker.sock must not exist."""
@@ -170,6 +186,7 @@ def check_docker_socket():
 
 
 # ── Check 5: No host workspace mount ──────────────────────────────────
+
 
 def check_no_host_mount():
     """No pyproject.toml/.git outside /app, no /workspace mount."""
@@ -200,6 +217,7 @@ def check_no_host_mount():
 
 # ── Check 6: No gateway secrets in environment ────────────────────────
 
+
 def check_no_gateway_secrets():
     """Environment must not contain gateway-only secret variable names."""
     found_secrets = []
@@ -224,6 +242,7 @@ def check_no_gateway_secrets():
 
 
 # ── Check 7: HTTP probes to gateway ───────────────────────────────────
+
 
 def _http_request(method, path, host=GATEWAY_HOST, port=GATEWAY_PORT, body=None, headers=None):
     """Make an HTTP request.  Returns (status_code, body_text) or raises."""
@@ -256,7 +275,8 @@ def check_gateway_http_denied():
     # Malformed token
     try:
         status, body = _http_request(
-            "GET", "/internal/bank/accounts",
+            "GET",
+            "/internal/bank/accounts",
             headers={"Authorization": "Bearer malformed-token-xyz"},
         )
         if status == 401:
@@ -289,7 +309,8 @@ def check_gateway_http_denied():
 
     try:
         status, body = _http_request(
-            "GET", "/internal/bank/accounts",
+            "GET",
+            "/internal/bank/accounts",
             headers={"Authorization": f"Bearer {forged_token}"},
         )
         if status == 401:
@@ -302,7 +323,8 @@ def check_gateway_http_denied():
     # POST /api/conversations/{id}/text — fabricated user turn
     try:
         status, body = _http_request(
-            "POST", "/api/conversations/fake-conv-id/text",
+            "POST",
+            "/api/conversations/fake-conv-id/text",
             body='{"text":"pay mum 50"}',
             headers={"Content-Type": "application/json"},
         )
@@ -316,7 +338,8 @@ def check_gateway_http_denied():
     # /internal/audit/agent-events without token
     try:
         status, body = _http_request(
-            "POST", "/internal/audit/agent-events",
+            "POST",
+            "/internal/audit/agent-events",
             body='{"step":"agent.extract","payload":{}}',
             headers={"Content-Type": "application/json"},
         )
@@ -329,6 +352,7 @@ def check_gateway_http_denied():
 
 
 # ── Check 8: Cross-service connectivity ────────────────────────────────
+
 
 def check_cross_service():
     """Agent cannot reach validator:8003; validator cannot reach agent:8001."""
@@ -352,6 +376,7 @@ def check_cross_service():
 
 # ── Check 9: Gateway /health reachable ────────────────────────────────
 
+
 def check_gateway_health():
     """Gateway /health should be reachable from both agent and validator."""
     try:
@@ -366,6 +391,7 @@ def check_gateway_health():
 
 # ── Check 10: Process UID ──────────────────────────────────────────────
 
+
 def check_uid():
     """Own process user must be the expected non-root UID."""
     uid = os.getuid()
@@ -377,6 +403,7 @@ def check_uid():
 
 
 # ── Check 11: Own /health endpoint ────────────────────────────────────
+
 
 def check_own_health():
     """Own /health should respond 200."""
@@ -395,6 +422,7 @@ def check_own_health():
 
 
 # ── Main ──────────────────────────────────────────────────────────────
+
 
 def main():
     print(f"\n{'=' * 72}")

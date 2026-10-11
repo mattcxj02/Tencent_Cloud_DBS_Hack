@@ -127,7 +127,7 @@ services:
     environment:
       - VALIDATE_PROVIDER=${VALIDATE_PROVIDER:-deepseek}
       - VALIDATE_MODEL=${VALIDATE_MODEL:-deepseek-flash}
-      - VALIDATE_MAX_TOKENS=${VALIDATE_MAX_TOKENS:-2048}
+      - VALIDATE_MAX_TOKENS=${VALIDATE_MAX_TOKENS:-4096}
       # Least privilege: only the key for VALIDATE_PROVIDER (deepseek). If you change
       # the provider, swap this line for tokenhub_key.
       - deepseek_key=${deepseek_key:-}

@@ -1,0 +1,626 @@
+{
+  "meta": {
+    "run_id": "20261010T092733Z-fake-t1",
+    "mode": "fake",
+    "trial": 1,
+    "started_at": "2026-10-10T09:27:33+00:00",
+    "finished_at": "2026-10-10T09:28:00+00:00",
+    "wall_s": 17.3,
+    "git_head": "67d2d71",
+    "golden_version": "golden-v1",
+    "cases_sha256": "0116eeccca14bf65d384a8b3592cce49857fb7aa90ac9466218ef61000eb4757",
+    "cases_run": 2,
+    "cases_selected": 2,
+    "coverage_gaps": [],
+    "cost": "unavailable (no model price configured)",
+    "telemetry_health": {
+      "backend": "langfuse",
+      "state": "ok",
+      "last_error": null,
+      "dropped": 0,
+      "pending": 0,
+      "exported": 52,
+      "service": "evals"
+    },
+    "extractor": {
+      "provider": "fake",
+      "model": "fake-oracle-extractor",
+      "prompt_version": "extractor-v1",
+      "prompt_sha256": "8a3d5333bc4b8ab87f71808f33264c3e324db68419318cc384db7bf90754300c",
+      "max_tokens": null
+    },
+    "validator": {
+      "provider": "fake",
+      "model": "fake-oracle-validator",
+      "prompt_version": "validator-v1",
+      "prompt_hash": "19c561a9d19e0cce46a805f09634b65cc6bc4343b64b10131a3b906924f02575",
+      "timeout_s": 5.0
+    }
+  },
+  "summary": {
+    "extraction": {
+      "ordinary": {
+        "n": 1,
+        "outcome_correct": 1,
+        "draft_expected": 1,
+        "exact": 1,
+        "clarify_expected": 0,
+        "clarify_correct": 0,
+        "safe_not_exact": 0,
+        "unsafe_drafts": 0,
+        "agent_errors": 0,
+        "missing_leg_cases": 0,
+        "extra_leg_cases": 0,
+        "classes": {
+          "exact": 1
+        },
+        "agent_latency": {
+          "n": 1,
+          "p50_ms": 58,
+          "p95_ms": 58,
+          "max_ms": 58
+        },
+        "extractor_latency": {
+          "n": 1,
+          "p50_ms": 0,
+          "p95_ms": 0,
+          "max_ms": 0
+        },
+        "extractor_call_errors": 0,
+        "extractor_usage": {
+          "calls": 1,
+          "calls_with_usage": 0,
+          "prompt_tokens": 0,
+          "completion_tokens": 0,
+          "total_tokens": 0
+        }
+      },
+      "clarification": {
+        "n": 1,
+        "outcome_correct": 1,
+        "draft_expected": 0,
+        "exact": 0,
+        "clarify_expected": 1,
+        "clarify_correct": 1,
+        "safe_not_exact": 0,
+        "unsafe_drafts": 0,
+        "agent_errors": 0,
+        "missing_leg_cases": 0,
+        "extra_leg_cases": 0,
+        "classes": {
+          "correct_clarification": 1
+        },
+        "agent_latency": {
+          "n": 1,
+          "p50_ms": 20,
+          "p95_ms": 20,
+          "max_ms": 20
+        },
+        "extractor_latency": {
+          "n": 1,
+          "p50_ms": 0,
+          "p95_ms": 0,
+          "max_ms": 0
+        },
+        "extractor_call_errors": 0,
+        "extractor_usage": {
+          "calls": 1,
+          "calls_with_usage": 0,
+          "prompt_tokens": 0,
+          "completion_tokens": 0,
+          "total_tokens": 0
+        }
+      },
+      "all": {
+        "n": 2,
+        "outcome_correct": 2,
+        "draft_expected": 1,
+        "exact": 1,
+        "clarify_expected": 1,
+        "clarify_correct": 1,
+        "safe_not_exact": 0,
+        "unsafe_drafts": 0,
+        "agent_errors": 0,
+        "missing_leg_cases": 0,
+        "extra_leg_cases": 0,
+        "classes": {
+          "correct_clarification": 1,
+          "exact": 1
+        },
+        "agent_latency": {
+          "n": 2,
+          "p50_ms": 20,
+          "p95_ms": 58,
+          "max_ms": 58
+        },
+        "extractor_latency": {
+          "n": 2,
+          "p50_ms": 0,
+          "p95_ms": 0,
+          "max_ms": 0
+        },
+        "extractor_call_errors": 0,
+        "extractor_usage": {
+          "calls": 2,
+          "calls_with_usage": 0,
+          "prompt_tokens": 0,
+          "completion_tokens": 0,
+          "total_tokens": 0
+        }
+      }
+    },
+    "extraction_by_split": {
+      "dev_overlap": {
+        "n": 1,
+        "outcome_correct": 1,
+        "draft_expected": 0,
+        "exact": 0,
+        "clarify_expected": 1,
+        "clarify_correct": 1,
+        "safe_not_exact": 0,
+        "unsafe_drafts": 0,
+        "agent_errors": 0,
+        "missing_leg_cases": 0,
+        "extra_leg_cases": 0,
+        "classes": {
+          "correct_clarification": 1
+        },
+        "agent_latency": {
+          "n": 1,
+          "p50_ms": 20,
+          "p95_ms": 20,
+          "max_ms": 20
+        },
+        "extractor_latency": {
+          "n": 1,
+          "p50_ms": 0,
+          "p95_ms": 0,
+          "max_ms": 0
+        },
+        "extractor_call_errors": 0,
+        "extractor_usage": {
+          "calls": 1,
+          "calls_with_usage": 0,
+          "prompt_tokens": 0,
+          "completion_tokens": 0,
+          "total_tokens": 0
+        }
+      },
+      "held_out": {
+        "n": 1,
+        "outcome_correct": 1,
+        "draft_expected": 1,
+        "exact": 1,
+        "clarify_expected": 0,
+        "clarify_correct": 0,
+        "safe_not_exact": 0,
+        "unsafe_drafts": 0,
+        "agent_errors": 0,
+        "missing_leg_cases": 0,
+        "extra_leg_cases": 0,
+        "classes": {
+          "exact": 1
+        },
+        "agent_latency": {
+          "n": 1,
+          "p50_ms": 58,
+          "p95_ms": 58,
+          "max_ms": 58
+        },
+        "extractor_latency": {
+          "n": 1,
+          "p50_ms": 0,
+          "p95_ms": 0,
+          "max_ms": 0
+        },
+        "extractor_call_errors": 0,
+        "extractor_usage": {
+          "calls": 1,
+          "calls_with_usage": 0,
+          "prompt_tokens": 0,
+          "completion_tokens": 0,
+          "total_tokens": 0
+        }
+      }
+    },
+    "validator": {
+      "ordinary": {
+        "natural": {
+          "correct": {
+            "n": 1,
+            "accepted_extractor_only": 1,
+            "accepted_with_validator": 1,
+            "blocked_with_validator": {
+              "MISMATCH": 0,
+              "UNCERTAIN": 0,
+              "ERROR": 0
+            }
+          }
+        },
+        "wrong": {
+          "incorrect": {
+            "n": 2,
+            "accepted_extractor_only": 2,
+            "accepted_with_validator": 0,
+            "blocked_with_validator": {
+              "MISMATCH": 2,
+              "UNCERTAIN": 0,
+              "ERROR": 0
+            }
+          }
+        },
+        "calls": 3,
+        "errors": 0,
+        "timeouts": 0,
+        "error_codes": {},
+        "latency": {
+          "n": 3,
+          "p50_ms": 0,
+          "p95_ms": 0,
+          "max_ms": 0
+        },
+        "wall": {
+          "n": 3,
+          "p50_ms": 5,
+          "p95_ms": 25,
+          "max_ms": 25
+        },
+        "usage": {
+          "calls": 3,
+          "calls_with_usage": 0,
+          "prompt_tokens": 0,
+          "completion_tokens": 0,
+          "total_tokens": 0
+        },
+        "wrong_not_built": 0
+      },
+      "clarification": {
+        "natural": {},
+        "wrong": {},
+        "calls": 0,
+        "errors": 0,
+        "timeouts": 0,
+        "error_codes": {},
+        "latency": {
+          "n": 0,
+          "p50_ms": null,
+          "p95_ms": null,
+          "max_ms": null
+        },
+        "wall": {
+          "n": 0,
+          "p50_ms": null,
+          "p95_ms": null,
+          "max_ms": null
+        },
+        "usage": {
+          "calls": 0,
+          "calls_with_usage": 0,
+          "prompt_tokens": 0,
+          "completion_tokens": 0,
+          "total_tokens": 0
+        },
+        "wrong_not_built": 0
+      },
+      "all": {
+        "natural": {
+          "correct": {
+            "n": 1,
+            "accepted_extractor_only": 1,
+            "accepted_with_validator": 1,
+            "blocked_with_validator": {
+              "MISMATCH": 0,
+              "UNCERTAIN": 0,
+              "ERROR": 0
+            }
+          }
+        },
+        "wrong": {
+          "incorrect": {
+            "n": 2,
+            "accepted_extractor_only": 2,
+            "accepted_with_validator": 0,
+            "blocked_with_validator": {
+              "MISMATCH": 2,
+              "UNCERTAIN": 0,
+              "ERROR": 0
+            }
+          }
+        },
+        "calls": 3,
+        "errors": 0,
+        "timeouts": 0,
+        "error_codes": {},
+        "latency": {
+          "n": 3,
+          "p50_ms": 0,
+          "p95_ms": 0,
+          "max_ms": 0
+        },
+        "wall": {
+          "n": 3,
+          "p50_ms": 5,
+          "p95_ms": 25,
+          "max_ms": 25
+        },
+        "usage": {
+          "calls": 3,
+          "calls_with_usage": 0,
+          "prompt_tokens": 0,
+          "completion_tokens": 0,
+          "total_tokens": 0
+        },
+        "wrong_not_built": 0
+      }
+    },
+    "policy": {
+      "drafts_probed": 1,
+      "decisions": {
+        "PASS": 1
+      },
+      "codes": {},
+      "expectations": []
+    }
+  },
+  "failures": [],
+  "langfuse": {
+    "runs": [
+      {
+        "name": "DRYRUN fake models extractor-only",
+        "run_name": "extractor-only golden-v1 20261010T092733Z-fake-t1",
+        "dataset_run_id": "dc0708b9-f3d7-41f5-b083-6e9446bc6ac8",
+        "dataset_run_url": "https://us.cloud.langfuse.com/project/cmv0p9svb0007ad0jevk28oeq/datasets/cmv26xwk90170ad0jqdqvzdmg/runs/dc0708b9-f3d7-41f5-b083-6e9446bc6ac8",
+        "items_completed": 2,
+        "run_scores": {
+          "cases": 2.0,
+          "outcome_correct_total": 2.0,
+          "exact_drafts_total": 1.0,
+          "unsafe_drafts_total": 0.0,
+          "agent_p50_ms": 20.0,
+          "agent_p95_ms": 58.0
+        }
+      },
+      {
+        "name": "DRYRUN fake models extractor+validator",
+        "run_name": "extractor+validator golden-v1 20261010T092733Z-fake-t1",
+        "dataset_run_id": "7e1247e4-f640-4d4a-bcd6-d0f8e9a68b0e",
+        "dataset_run_url": "https://us.cloud.langfuse.com/project/cmv0p9svb0007ad0jevk28oeq/datasets/cmv26xwk90170ad0jqdqvzdmg/runs/7e1247e4-f640-4d4a-bcd6-d0f8e9a68b0e",
+        "items_completed": 2,
+        "run_scores": {
+          "validator_calls": 3.0,
+          "validator_errors": 0.0,
+          "wrong_drafts": 2.0,
+          "wrong_drafts_accepted": 0.0,
+          "correct_drafts": 1.0,
+          "correct_drafts_accepted": 1.0,
+          "validator_p50_ms": 0.0,
+          "validator_p95_ms": 0.0
+        }
+      }
+    ],
+    "errors": [],
+    "dataset": {
+      "name": "dcta-golden-v1-dryrun",
+      "id": "cmv26xwk90170ad0jqdqvzdmg",
+      "url": "https://us.cloud.langfuse.com/project/cmv0p9svb0007ad0jevk28oeq/datasets/cmv26xwk90170ad0jqdqvzdmg",
+      "items": 35
+    },
+    "read_back": [
+      {
+        "what": "agent run + extractor generation",
+        "trace_id": "aa29e4e78f0f7fa8c47550b1e4a01317",
+        "url": "https://us.cloud.langfuse.com/project/cmv0p9svb0007ad0jevk28oeq/traces/aa29e4e78f0f7fa8c47550b1e4a01317",
+        "observations": 17,
+        "names": [
+          "agent.run",
+          "agent_latency_ms",
+          "clarification_correct",
+          "compile",
+          "critical_field_exact",
+          "experiment-item-evaluation",
+          "experiment-item-run",
+          "experiment-item-task",
+          "extract",
+          "extractor",
+          "ingest",
+          "normalize",
+          "outcome_correct",
+          "propose",
+          "resolve",
+          "unsafe_draft"
+        ],
+        "error": null
+      },
+      {
+        "what": "gateway validation + validator generation",
+        "trace_id": "7e51f59223005a7a29f59f67bf1324df",
+        "url": "https://us.cloud.langfuse.com/project/cmv0p9svb0007ad0jevk28oeq/traces/7e51f59223005a7a29f59f67bf1324df",
+        "observations": 14,
+        "names": [
+          "eval.wrong_draft_validation",
+          "experiment-item-evaluation",
+          "experiment-item-run",
+          "experiment-item-task",
+          "natural_draft",
+          "semantic_validation",
+          "validator-llm-call",
+          "wrong_drafts"
+        ],
+        "error": null
+      }
+    ]
+  },
+  "records": [
+    {
+      "case_id": "ord-01-transfer-payee",
+      "category": "ordinary",
+      "split": "held_out",
+      "expected": {
+        "outcome": "draft",
+        "legs": [
+          {
+            "action": "transfer",
+            "target_type": "saved_payee",
+            "target_id": "payee-ahma",
+            "source_account_id": "acct-matthew-savings",
+            "amount": "80.00",
+            "reference": null,
+            "budget": null
+          }
+        ]
+      },
+      "clarify_is_safe": false,
+      "agent": {
+        "status": "draft_frozen",
+        "reason": null,
+        "question": null,
+        "error_code": null,
+        "bundle_id": "36b8385f-7806-4f51-b0c0-d67672c63899",
+        "legs": [
+          {
+            "leg_id": "leg-1",
+            "action": "transfer",
+            "target_type": "saved_payee",
+            "target_id": "payee-ahma",
+            "source_account_id": "acct-matthew-savings",
+            "amount": "80.00",
+            "reference": null,
+            "budget": null,
+            "quantity": null,
+            "display_name": "Ah Ma"
+          }
+        ],
+        "trace_id": "aa29e4e78f0f7fa8c47550b1e4a01317",
+        "latency_ms": 58,
+        "extractor_calls": [
+          {
+            "latency_ms": 0,
+            "finish_reason": "stop",
+            "usage": null,
+            "content": "{\"intents\": [{\"action\": \"transfer\", \"amount_quote\": \"$80\", \"recipient_quote\": \"Ah Ma\", \"source_quote\": \"savings account\", \"reference_quote\": null, \"relative_to_quote\": null, \"unclear\": []}], \"unclear\": []}"
+          }
+        ],
+        "class": "exact",
+        "comparison": {
+          "exact": true,
+          "expected_legs": 1,
+          "actual_legs": 1,
+          "missing_legs": 0,
+          "extra_legs": 0,
+          "field_errors": [],
+          "secondary_errors": []
+        }
+      },
+      "label": "correct",
+      "policy": {
+        "decision": "PASS",
+        "codes": []
+      },
+      "policy_expected": null,
+      "policy_expectation_met": null,
+      "natural_validation": {
+        "status": "OK",
+        "verdict": "MATCH",
+        "code": null,
+        "issues": [],
+        "latency_ms": 0,
+        "wall_ms": 25,
+        "usage": null,
+        "trace_id": "7e51f59223005a7a29f59f67bf1324df",
+        "model": "fake-oracle-validator",
+        "prompt_hash": "19c561a9d19e0cce46a805f09634b65cc6bc4343b64b10131a3b906924f02575",
+        "eligible_for_confirmation": true
+      },
+      "wrong_drafts": [
+        {
+          "id": "w-amount",
+          "kind": "wrong_amount",
+          "built": true,
+          "validation": {
+            "status": "OK",
+            "verdict": "MISMATCH",
+            "code": null,
+            "issues": [
+              {
+                "leg_id": "leg-1",
+                "field": "other",
+                "reason": "fake oracle verdict (dry run)",
+                "supported_value": null,
+                "evidence": []
+              }
+            ],
+            "latency_ms": 0,
+            "wall_ms": 5,
+            "usage": null,
+            "trace_id": "7e51f59223005a7a29f59f67bf1324df",
+            "model": "fake-oracle-validator",
+            "prompt_hash": "19c561a9d19e0cce46a805f09634b65cc6bc4343b64b10131a3b906924f02575",
+            "case_id": "ord-01-transfer-payee"
+          }
+        },
+        {
+          "id": "w-recipient",
+          "kind": "wrong_recipient",
+          "built": true,
+          "validation": {
+            "status": "OK",
+            "verdict": "MISMATCH",
+            "code": null,
+            "issues": [
+              {
+                "leg_id": "leg-1",
+                "field": "other",
+                "reason": "fake oracle verdict (dry run)",
+                "supported_value": null,
+                "evidence": []
+              }
+            ],
+            "latency_ms": 0,
+            "wall_ms": 3,
+            "usage": null,
+            "trace_id": "7e51f59223005a7a29f59f67bf1324df",
+            "model": "fake-oracle-validator",
+            "prompt_hash": "19c561a9d19e0cce46a805f09634b65cc6bc4343b64b10131a3b906924f02575",
+            "case_id": "ord-01-transfer-payee"
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "clr-01-two-johns-ask",
+      "category": "clarification",
+      "split": "dev_overlap",
+      "expected": {
+        "outcome": "clarify",
+        "field": "recipient"
+      },
+      "clarify_is_safe": false,
+      "agent": {
+        "status": "clarify",
+        "reason": "RECIPIENT_AMBIGUOUS",
+        "question": "Which “John” do you mean: John Doe (account ending 4521) or John Tan (account ending 8892)?",
+        "error_code": null,
+        "bundle_id": null,
+        "legs": null,
+        "trace_id": "9b80d9fff5a061426867f46a83663eb3",
+        "latency_ms": 20,
+        "extractor_calls": [
+          {
+            "latency_ms": 0,
+            "finish_reason": "stop",
+            "usage": null,
+            "content": "{\"intents\": [{\"action\": \"transfer\", \"amount_quote\": \"$120\", \"recipient_quote\": \"John\", \"source_quote\": \"savings\", \"reference_quote\": null, \"relative_to_quote\": null, \"unclear\": []}], \"unclear\": []}"
+          }
+        ],
+        "class": "correct_clarification",
+        "comparison": null
+      },
+      "label": null,
+      "policy": null,
+      "policy_expected": null,
+      "policy_expectation_met": null,
+      "natural_validation": null,
+      "wrong_drafts": []
+    }
+  ]
+}

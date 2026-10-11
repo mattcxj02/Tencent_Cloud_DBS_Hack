@@ -312,6 +312,31 @@ async def login_verify(
     return {"user_id": cred["user_id"]}
 
 
+# ── Current user ───────────────────────────────────────────────────
+
+
+@router.get("/api/auth/me")
+def me(user: Annotated[UserPrincipal, Depends(require_user_session)]) -> dict[str, Any]:
+    """The session user: ``{user_id, display_name, credentials: [{credential_id,
+    created_at}]}``. Public key, sign count and transports are not returned."""
+    store = get_identity_store()
+    conn = store._conn()
+    try:
+        row = conn.execute(
+            "SELECT display_name FROM users WHERE user_id = ?", (user.user_id,)
+        ).fetchone()
+    finally:
+        conn.close()
+    return {
+        "user_id": user.user_id,
+        "display_name": row["display_name"] if row is not None else user.user_id,
+        "credentials": [
+            {"credential_id": c["credential_id"], "created_at": c["created_at"]}
+            for c in store.get_user_credentials(user.user_id)
+        ],
+    }
+
+
 # ── Logout ─────────────────────────────────────────────────────────
 
 

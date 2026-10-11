@@ -186,3 +186,45 @@ Langfuse is a real required backend: correlated traces across agent/validator/ga
 The gateway's prototype hash chain stores authoritative decisions and distinguishes untrusted agent event reports. Local audit failure rolls back payment. Langfuse outage reports degraded observability and triggers bounded sanitized export retry, but cannot relax controls or repeat a payment. The final submission must still include verified backend traces and experiment runs. A hash chain alone cannot prove resistance to privileged full rewriting or tail deletion; signed external checkpoints remain future work.
 
 The MVP diagram intentionally shows no signed pack registry, agent-signed draft, gateway-signed ledger order or signed receipt. Those were unimplemented additions to the prior drawing; the full product features in PLAN remain unchanged. Recommendations are preserved in `PLAN_REVIEW.md` as optional future work.
+
+**As built (10 Oct 2026)**
+
+Where the implementation differs from the design above, or makes it more specific. The diagrams above are unchanged. Sources: the folder READMEs and `evidence/`.
+
+- **Evidence-based lineage instead of model span references.**
+  - The extractor returns quoted words only: no IDs, offsets or display names. The agent finds each quote verbatim in a current user turn and narrows it to words that name exactly one bank record.
+  - The gateway (`gateway/evidence.py`) re-checks all three conditions: the location; that the words name exactly one record; and that cited amount words mean exactly the proposed amount (`shared/amounts.py`).
+  - References and double-quoted text cannot supply critical fields. An ambiguous name ("John") is refused until the user disambiguates. The source account must also come from the user's words, so "send 15 to John" without a source gets a question ([E2E](evidence/E2E-live.md)).
+- **Clarification questions are written by code** (`agent/questions.py`) from fixed text, the user's own words and gateway bank labels. They are never model text.
+- **Orchestration route.**
+  1. The browser calls `POST /api/conversations/{id}/draft`.
+  2. The gateway mints a 120 s delegation token for that user and conversation, with exactly the scopes `conversation:read`, `bank:read`, `draft:freeze`, `conversation:propose_question` and `audit:append_agent`.
+  3. It calls the agent's `/internal/run` with a `traceparent`. The proposal comes back through `/internal/drafts`, where the gateway freezes it.
+  4. The gateway then runs the validation coordinator in-process, which calls the validator service over HTTP. The agent is re-run once if the revision went stale.
+- **Timeouts and token budgets**, set from live measurements:
+
+  | Setting | Value | Why |
+  |---|---|---|
+  | Gateway → agent (`AGENT_TIMEOUT_SECONDS`) | 45 s | Raised from 15 s after a live `hy3` turn took 17.4 s; 5 of the 35 T-14 runs exceeded 15 s, and the maximum was 29.0 s |
+  | Validator model deadline (`VALIDATE_TIMEOUT_SECONDS`) | 30 s | |
+  | Gateway's validator client | 40 s | |
+  | Extractor client | 60 s | |
+  | `EXTRACT_MAX_TOKENS`, `VALIDATE_MAX_TOKENS` | 4096 each | `hy3` reasons before answering; the validator budget was raised from 2048 after two empty outputs in T-14 |
+
+  A validation error allows at most 3 attempts per draft and never becomes MATCH.
+- **Validator input.**
+  - The request is built by the gateway alone: the stored bundle bytes, the turns covered by the stored conversation hash, and bank labels including same-name candidates.
+  - No balances are included, so the model cannot verify "the rest" (a T-14 finding).
+  - A result is bound to the bundle, conversation, bank-label and input hashes. A changed bank label makes a MATCH ineligible.
+- **Voice.**
+  - Push-to-talk sentence ASR, not streaming. The browser uploads a 16 kHz mono WAV, and the gateway stores and digest-checks it before transcription.
+  - No route accepts client-supplied ASR text.
+  - The user's own saved payee names, aliases and billers are passed to TRTC as `hotword_list` (sanitized, at most 30 words). Without them "Ah Ma" was heard as "Amma" ([T-12](evidence/T-12-voice.md)).
+- **Step-up channel.** It is simulated by the gateway operator routes plus `scripts/operator_console.py`. These are enabled only when `OPERATOR_TOKEN` (at least 32 characters) is set, and they refuse user sessions and agent tokens. The step-up challenge expires with the signed envelope (120 s or less).
+- **Approval UI.** Approval happens in the chat's confirmation, and there is no separate Approve page. It signs the WebAuthn options derived from the stored envelope. Passkeys must be discoverable (resident) credentials.
+- **Langfuse.**
+  - Langfuse Cloud (US region), SDK 4.17. Read-back uses the v2 observations API, because the legacy trace API returns 410 for this organization.
+  - The gateway's `ingest` span never exports turn text. Model generations export the model-visible data, with account IDs replaced by display labels.
+- **Isolation.** Compose uses two bridge networks, `agent_net` and `validator_net`. Neither is `internal`, so both models keep outbound LLM egress, but the agent and validator cannot reach each other. Their root filesystems are read-only, only the gateway has the `/data` volume, and each container gets only its own LLM key ([T-04](evidence/T-04-isolation.txt)).
+- **Usability baseline.** A conventional form at `#/baseline` (it makes no gateway calls), for the comparison study in `evals/usability/`.
+- **Not built** (the same as stated above): signed pack registries, signed receipts, external audit checkpoints, Tencent APM, TTS and public hosting. The Rogue Agent Mode harness and attack matrix (T-13) are in progress.
