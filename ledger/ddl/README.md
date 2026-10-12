@@ -6,4 +6,6 @@ Only idempotent `CREATE TABLE IF NOT EXISTS` / `CREATE INDEX IF NOT EXISTS` stat
 
 | File | Tables |
 |---|---|
+| `phase6.sql` | `draft_calculations`: immutable calculation JSON and digest per frozen bundle; `enrollment_challenges`: persistent code-to-registration-challenge binding and begin count. Additive tables installed by `make upgrade-db` |
 | `validation.sql` | `validation_results`: one row per validator attempt, bound to bundle hash, conversation revision/hash, bank-label hash and input hash; `state` PENDING/CURRENT/SUPERSEDED |
+| `payee_nicknames.sql` | `payee_nicknames`: customer-chosen nicknames for their own saved payees, unique per customer by `name_key` (case, spaces and punctuation removed) |

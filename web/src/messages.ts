@@ -5,6 +5,16 @@
 import { VOICE_CODE_MESSAGES } from './audio/messages'
 
 export const CODE_MESSAGES: Record<string, string> = {
+  // ── Payee nicknames ──
+  PAYEE_NOT_FOUND: 'That payee is not one of your saved payees.',
+  NICKNAME_INVALID: 'Use 2 to 30 letters (spaces, hyphens and apostrophes are fine), no numbers or symbols.',
+  NICKNAME_RESERVED: 'That word already means something else in a payment (for example "savings" or "my"). Choose another nickname.',
+  NICKNAME_EXISTS: 'This payee already has that name or nickname.',
+  NICKNAME_CONFLICT:
+    'That nickname would also match another payee, one of your accounts, a biller or a stock, so it could be confused. Choose a more specific nickname.',
+  NICKNAME_LIMIT: 'This payee already has the maximum of 10 nicknames. Remove one first.',
+  NICKNAME_NOT_FOUND: 'That nickname was already removed.',
+
   // Voice capture and upload codes are owned by the voice task (src/audio/messages.ts).
   ...VOICE_CODE_MESSAGES,
 
@@ -86,6 +96,12 @@ export const CODE_MESSAGES: Record<string, string> = {
   VALIDATION_REQUEST_INVALID: 'The independent check could not be prepared.',
   VALIDATOR_TIMEOUT: 'The independent check took too long.',
   VALIDATOR_UNAVAILABLE: 'The independent check is unavailable right now.',
+  SERVICE_TOKEN_UNSET: 'The payment assistant is unavailable because its independent check needs setup. Please contact the operator.',
+  VALIDATOR_AUTH_FAILED: 'The payment assistant is unavailable because its independent check needs setup. Please contact the operator.',
+  SERVICE_CONFIGURATION_INVALID: 'The payment assistant needs setup. Please contact the operator.',
+  DRAFTING_UNAVAILABLE: 'The payment assistant is unavailable right now. Nothing was paid.',
+  EXTRACTOR_NOT_CONFIGURED: 'The payment assistant needs setup. Please contact the operator.',
+  READINESS_TIMEOUT: 'The payment assistant did not respond to its readiness check. Please try later.',
   VALIDATOR_HTTP_ERROR: 'The independent check failed.',
   VALIDATOR_RESPONSE_INVALID: 'The independent check returned an unusable answer, so this cannot be approved.',
   LLM_TIMEOUT: 'The independent check took too long.',
@@ -103,9 +119,14 @@ export const CODE_MESSAGES: Record<string, string> = {
   AGENT_ERROR: 'The assistant could not prepare a draft.',
   DRAFT_FAILED: 'Something went wrong while preparing the draft. Nothing was paid.',
   ORCHESTRATION_TIMEOUT: 'Preparing and checking the draft took too long. Please try again.',
-  CONVERSATION_CHANGED: 'The conversation changed while the draft was being prepared. Please try again.',
+  CONVERSATION_CHANGED: 'Your conversation changed again while drafting. Your messages are saved; prepare the latest draft when you are ready.',
+  STALE_CONVERSATION_REVISION: 'The requested revision is out of date. Your latest messages are saved.',
+  REQUEST_TIMEOUT: 'The gateway response took too long. Check the saved result before retrying.',
+  REQUEST_CANCELLED: 'This browser request was stopped.',
+  PROGRESS_NOT_FOUND: 'Progress is no longer available. Your messages are saved; existing payments can be checked in the evidence trail.',
+  REDRAFT_REQUIRED: 'There is no unchanged frozen draft to validate. Correct your request or prepare a new draft.',
+  DRAFT_CANCELLED: 'Draft preparation stopped. This does not cancel an approved payment.',
   CONVERSATION_NOT_FOUND: 'This conversation could not be found. Please start a new one.',
-  STALE_CONVERSATION_REVISION: 'The conversation changed while the draft was being prepared. Please try again.',
   VALIDATION_NOT_ELIGIBLE: 'Something changed since the independent check (for example a balance). Please try again.',
   VALIDATION_ERROR: 'The independent check failed, so this cannot be approved yet. Please try again.',
   UNEXPECTED_DRAFT_STATUS: 'The draft response was not understood, so nothing can be approved.',
@@ -175,6 +196,11 @@ export function describeCode(code: string): string {
 /** Distinct messages for a list of reason codes, in order. */
 export function describeCodes(codes: string[]): { code: string; message: string }[] {
   return [...new Set(codes)].map((code) => ({ code, message: describeCode(code) }))
+}
+
+/** Drafting again cannot repair service configuration. */
+export function isConfigurationError(code: string): boolean {
+  return ['SERVICE_TOKEN_UNSET', 'VALIDATOR_AUTH_FAILED', 'SERVICE_CONFIGURATION_INVALID', 'LLM_NOT_CONFIGURED', 'EXTRACTOR_NOT_CONFIGURED'].includes(code)
 }
 
 /** Authorization statuses as words. */

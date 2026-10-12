@@ -8,3 +8,10 @@ Who is calling the gateway.
 | `session.py` | `require_user_session()` validates the browser's session cookie (HttpOnly, SameSite=Strict) against the server-side session table, including expiry and idle timeout. Fails closed on any doubt; tests substitute it only through FastAPI `dependency_overrides` |
 
 There is no runtime bypass flag or header.
+
+Orchestrated delegation tokens also bind a signed `run_id`. Scoped reads and proposals
+check that this run is active and still at its original revision. Freeze/question
+writes repeat the check inside their transaction and before commit. Completion,
+timeout, cancellation or superseding input revokes the run; ordinary tokens retain
+TTL/scope checks. Audit-only callbacks remain allowed until token expiry. The registry
+is process-local: this deployment supports one gateway process.

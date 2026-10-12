@@ -1,0 +1,218 @@
+"""Gateway-owned questions and selections, persisted in the mandatory audit log.
+
+No database upgrade is needed. Question context is an untrusted extraction checkpoint;
+only a session-authenticated answer creates selection evidence. The gateway rechecks
+ownership and the field/leg/revision binding again when freezing a proposal.
+"""
+
+from __future__ import annotations
+
+import json
+import sqlite3
+import uuid
+from typing import Any
+
+from gateway.audit import append_audit
+from shared.canonical import canonical_bytes
+from shared.clarification import QuestionField, Selection
+from shared.schemas import TargetType
+
+
+def events(conn: sqlite3.Connection, conversation_id: str, step: str) -> list[dict[str, Any]]:
+    rows = conn.execute(
+        "SELECT payload_json FROM audit_events WHERE conversation_id = ? "
+        "AND source = 'gateway' AND step = ? ORDER BY seq",
+        (conversation_id, step),
+    ).fetchall()
+    return [json.loads(r["payload_json"]) for r in rows]
+
+
+def question(conn: sqlite3.Connection, conversation_id: str, turn_id: str) -> dict | None:
+    return next(
+        (
+            e
+            for e in reversed(events(conn, conversation_id, "gateway.clarification.question"))
+            if e["turn_id"] == turn_id
+        ),
+        None,
+    )
+
+
+def record_label(
+    conn: sqlite3.Connection, user_id: str, target_type: TargetType, record_id: str
+) -> str:
+    """Resolve IDs independently of the agent; all choices are owned bank records."""
+    if target_type == TargetType.own_account:
+        row = conn.execute(
+            "SELECT a.type, a.masked_suffix FROM accounts a JOIN account_holders h "
+            "ON h.account_id = a.account_id WHERE h.user_id = ? AND a.account_id = ?",
+            (user_id, record_id),
+        ).fetchone()
+        if row:
+            return f"{row['type']} (account ending {row['masked_suffix']})"
+    elif target_type in (TargetType.saved_payee, TargetType.saved_paynow):
+        kind = "paynow" if target_type == TargetType.saved_paynow else "bank"
+        row = conn.execute(
+            "SELECT display_name, masked_suffix FROM payees WHERE owner_user_id = ? "
+            "AND payee_id = ? AND kind = ?",
+            (user_id, record_id, kind),
+        ).fetchone()
+        if row:
+            if kind == "paynow":
+                return f"{row['display_name']} (PayNow)"
+            suffix = f" (account ending {row['masked_suffix']})" if row["masked_suffix"] else ""
+            return row["display_name"] + suffix
+    elif target_type == TargetType.biller:
+        row = conn.execute(
+            "SELECT b.display_name FROM billers b JOIN saved_billers s "
+            "ON s.biller_id = b.biller_id WHERE s.user_id = ? AND b.biller_id = ?",
+            (user_id, record_id),
+        ).fetchone()
+        if row:
+            return row["display_name"]
+    elif target_type == TargetType.owned_card:
+        row = conn.execute(
+            "SELECT masked_suffix FROM cards WHERE owner_user_id = ? AND card_id = ?",
+            (user_id, record_id),
+        ).fetchone()
+        if row:
+            return f"card (ending {row['masked_suffix']})"
+    elif target_type == TargetType.sgx_symbol:
+        from gateway.evidence import SGX_NAMES
+
+        if record_id in SGX_NAMES:
+            return record_id
+    raise ValueError("CHOICE_RECORD_INVALID")
+
+
+def prepare_fields(
+    conn: sqlite3.Connection, user_id: str, fields: list[QuestionField]
+) -> list[dict]:
+    result = []
+    seen = set()
+    for f in fields:
+        key = (f.leg_id, f.field)
+        if key in seen:
+            raise ValueError("CHOICE_FIELD_AMBIGUOUS")
+        seen.add(key)
+        choices = []
+        records = set()
+        for c in f.candidates:
+            key = (c.target_type, c.record_id)
+            if key in records or (f.field == "source" and c.target_type != TargetType.own_account):
+                raise ValueError("CHOICE_RECORD_INVALID")
+            records.add(key)
+            choices.append(
+                {
+                    "choice_id": uuid.uuid4().hex,
+                    "record_id": c.record_id,
+                    "target_type": c.target_type.value,
+                    "label": record_label(conn, user_id, c.target_type, c.record_id),
+                }
+            )
+        result.append(
+            {
+                "field_id": uuid.uuid4().hex,
+                "leg_id": f.leg_id,
+                "field": f.field,
+                "prompt": f.prompt,
+                "choices": choices,
+            }
+        )
+    return result
+
+
+def public_question(q: dict) -> dict:
+    return {
+        "revision": q["revision"],
+        "fields": [
+            {
+                **f,
+                "choices": [
+                    {"choice_id": c["choice_id"], "label": c["label"]} for c in f["choices"]
+                ],
+            }
+            for f in q["fields"]
+        ],
+    }
+
+
+def save_question(conn: sqlite3.Connection, conversation_id: str, user_id: str, q: dict) -> None:
+    if len(canonical_bytes(q)) > 24000:
+        raise ValueError("QUESTION_CONTEXT_TOO_LARGE")
+    append_audit(
+        conn,
+        source="gateway",
+        conversation_id=conversation_id,
+        user_id=user_id,
+        step="gateway.clarification.question",
+        payload=q,
+    )
+
+
+def check_question(
+    conn: sqlite3.Connection, conversation_id: str, turn_id: str, revision: int
+) -> dict | None:
+    q = question(conn, conversation_id, turn_id)
+    latest = conn.execute(
+        "SELECT turn_id FROM conversation_turns WHERE conversation_id = ? "
+        "AND role = 'app_question' ORDER BY seq DESC LIMIT 1",
+        (conversation_id,),
+    ).fetchone()
+    if q and (q["revision"] != revision or latest["turn_id"] != turn_id):
+        raise ValueError("STALE_QUESTION")
+    return q
+
+
+def selected_answer(
+    conn: sqlite3.Connection,
+    user_id: str,
+    q: dict,
+    revision: int | None,
+    selections: list[Selection],
+) -> tuple[str, list[dict]]:
+    if revision != q["revision"]:
+        raise ValueError("STALE_QUESTION_REVISION")
+    fields = {f["field_id"]: f for f in q["fields"]}
+    if not selections or len(selections) != len(fields):
+        raise ValueError("CHOICE_ANSWER_AMBIGUOUS")
+    chosen = []
+    seen = set()
+    text = ""
+    for s in selections:
+        f = fields.get(s.field_id)
+        if f is None or s.field_id in seen or (s.leg_id, s.field) != (f["leg_id"], f["field"]):
+            raise ValueError("CHOICE_BINDING_INVALID")
+        seen.add(s.field_id)
+        c = next((c for c in f["choices"] if c["choice_id"] == s.choice_id), None)
+        if c is None:
+            raise ValueError("CHOICE_ID_INVALID")
+        if sum(other["label"] == c["label"] for other in f["choices"]) != 1:
+            raise ValueError("CHOICE_ANSWER_AMBIGUOUS")
+        label = record_label(conn, user_id, TargetType(c["target_type"]), c["record_id"])
+        if label != c["label"]:
+            raise ValueError("CHOICE_RECORD_CHANGED")
+        text += f"{f['leg_id']} {f['field']}: "
+        start = len(text)
+        text += label
+        chosen.append(
+            {
+                **s.model_dump(),
+                "record_id": c["record_id"],
+                "target_type": c["target_type"],
+                "span": {"start": start, "end": len(text), "text": label},
+            }
+        )
+        text += "; "
+    return text.rstrip("; "), chosen
+
+
+def structured_update(conn: sqlite3.Connection, conversation_id: str, revision: int) -> dict | None:
+    answers = events(conn, conversation_id, "gateway.clarification.answer")
+    if not answers or answers[-1]["revision"] != revision:
+        return None
+    answer = answers[-1]
+    q = question(conn, conversation_id, answer["question_id"])
+    if q is None or q.get("extraction") is None:
+        return None
+    return {"extraction": q["extraction"], "selections": answer["selections"]}

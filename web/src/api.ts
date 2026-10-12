@@ -28,6 +28,17 @@ export interface Account {
   balance: string
 }
 
+/** A saved payee: bank aliases are fixed, nicknames are the customer's own. */
+export interface Payee {
+  payee_id: string
+  display_name: string
+  bank: string | null
+  masked_suffix: string | null
+  kind: 'bank' | 'paynow'
+  aliases: string[]
+  nicknames: string[]
+}
+
 // ── Conversation ─────────────────────────────────────────────────────
 
 export type TurnRole =
@@ -116,8 +127,28 @@ export interface ValidationView {
 
 export interface DraftClarify {
   status: 'clarify'
-  question: { turn_id: string; text: string }
+  question: ClarificationQuestion
   conversation_revision: number
+}
+
+export interface ClarificationQuestion {
+  turn_id: string
+  text: string
+  clarification?: {
+    revision: number
+    fields: {
+      field_id: string
+      leg_id: string
+      field: 'target' | 'source'
+      prompt: string
+      choices: { choice_id: string; label: string }[]
+    }[]
+  }
+}
+
+export interface StructuredAnswer {
+  question_revision: number
+  selections: { field_id: string; leg_id: string; field: 'target' | 'source'; choice_id: string }[]
 }
 
 export interface DraftBundle {
@@ -448,14 +479,16 @@ function codeOf(status: number, body: Record<string, unknown> | null): string {
   return `HTTP_${status}`
 }
 
-interface RequestOptions {
+export interface RequestOptions {
+  signal?: AbortSignal
+  timeoutMs?: number
   json?: unknown
   form?: FormData
   /** Do not treat a 401 as "session ended" (sign-in routes, the initial /auth/me probe). */
   quiet401?: boolean
 }
 
-async function request<T>(method: 'GET' | 'POST', path: string, opts: RequestOptions = {}): Promise<T> {
+export async function request<T>(method: 'GET' | 'POST' | 'DELETE', path: string, opts: RequestOptions = {}): Promise<T> {
   const init: RequestInit = { method, credentials: 'same-origin', cache: 'no-store' }
   if (opts.form) {
     init.body = opts.form
@@ -463,13 +496,26 @@ async function request<T>(method: 'GET' | 'POST', path: string, opts: RequestOpt
     init.headers = { 'Content-Type': 'application/json' }
     init.body = JSON.stringify(opts.json)
   }
+  const controller = new AbortController()
+  const abort = () => controller.abort()
+  opts.signal?.addEventListener('abort', abort, { once: true })
+  if (opts.signal?.aborted) controller.abort()
+  const timer = window.setTimeout(abort, opts.timeoutMs ?? 20000)
+  init.signal = controller.signal
   let res: Response
+  let data: unknown
   try {
     res = await fetch(`/api${path}`, init)
+    data = await res.json().catch((e: unknown) => {
+      if (controller.signal.aborted) throw e
+      return null
+    })
   } catch {
-    throw new ApiError(0, 'NETWORK_ERROR', [], null)
+    throw new ApiError(0, opts.signal?.aborted ? 'REQUEST_CANCELLED' : controller.signal.aborted ? 'REQUEST_TIMEOUT' : 'NETWORK_ERROR', [], null)
+  } finally {
+    window.clearTimeout(timer)
+    opts.signal?.removeEventListener('abort', abort)
   }
-  const data: unknown = await res.json().catch(() => null)
   if (!res.ok) {
     const body = asRecord(data)
     const reasons = Array.isArray(body?.reason_codes)
@@ -502,6 +548,13 @@ export const api = {
 
   accounts: () => request<Account[]>('GET', '/accounts'),
 
+  // Payees and nicknames
+  payees: () => request<Payee[]>('GET', '/payees'),
+  addNickname: (payeeId: string, nickname: string) =>
+    request<Payee>('POST', `/payees/${enc(payeeId)}/nicknames`, { json: { nickname } }),
+  removeNickname: (payeeId: string, nickname: string) =>
+    request<Payee>('DELETE', `/payees/${enc(payeeId)}/nicknames/${enc(nickname)}`),
+
   // Conversation
   createConversation: () => request<Conversation>('POST', '/conversations', { json: {} }),
   conversation: (id: string) => request<Conversation>('GET', `/conversations/${enc(id)}`),
@@ -511,14 +564,17 @@ export const api = {
     request<Turn>('POST', `/conversations/${enc(id)}/transcript-edit`, {
       json: { edits_turn_id: editsTurnId, text },
     }),
-  answer: (id: string, questionTurnId: string, text: string) =>
+  answer: (id: string, questionTurnId: string, answer: string | StructuredAnswer) =>
     request<Turn>('POST', `/conversations/${enc(id)}/answer`, {
-      json: { answers_question_id: questionTurnId, text },
+      json: { answers_question_id: questionTurnId, ...(typeof answer === 'string' ? { text: answer } : answer) },
     }),
   // Voice upload lives in src/audio/api.ts (voice task): it sends the WAV and consent=true.
-  draft: (id: string) => request<DraftResult>('POST', `/conversations/${enc(id)}/draft`, { json: {} }),
+  draft: (id: string, opts: { operation_id?: string; revision?: number; mode?: 'auto' | 'validation'; signal?: AbortSignal } = {}) => {
+    const { signal, ...json } = opts
+    return request<DraftResult>('POST', `/conversations/${enc(id)}/draft`, { json, signal, timeoutMs: 110000 })
+  },
   evidence: (id: string) => request<EvidenceView>('GET', `/conversations/${enc(id)}/evidence`),
-  validation: (bundleId: string) => request<ValidationView>('GET', `/drafts/${enc(bundleId)}/validation`),
+  validation: (bundleId: string, signal?: AbortSignal) => request<ValidationView>('GET', `/drafts/${enc(bundleId)}/validation`, { signal }),
 
   // Payment authorizations
   createAuthorization: (bundleId: string, credentialId: string) =>

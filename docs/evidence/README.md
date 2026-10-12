@@ -16,3 +16,5 @@ Outputs from real runs, kept for the submission and for review. Nothing here is 
 | `codebuddy/EXCERPTS.md` | Short sanitized excerpts from each CodeBuddy session log (opening, tool calls, test/probe results, credit-exhaustion and network-error endings) |
 
 Secrets are never recorded. CodeBuddy screenshots for the submission go in `codebuddy/screenshots/` when captured (none yet).
+
+- [phase6-validator-findings.md](phase6-validator-findings.md): investigation of the five historical false rejects, validator v2 changes, frozen calculation binding, enrollment regression results and outstanding live gates.

@@ -108,8 +108,11 @@ class Runtime:
     fake_validator: OracleVerdictLLM | None
     meta: dict[str, Any]
     _owned: list[Telemetry] = field(default_factory=list)
+    _extractor: OpenAICompatibleExtractor | None = None
 
     def close(self) -> None:
+        if self._extractor is not None:
+            self._extractor.close()
         for tel in self._owned:
             tel.shutdown()
 
@@ -174,6 +177,7 @@ def build_runtime(fake: bool, *, langfuse: bool) -> Runtime | str:
                     "prompt_version": prompt.version,
                     "prompt_sha256": prompt.sha256,
                     "max_tokens": None,
+                    "reasoning_effort": None,
                 },
                 "validator": {
                     "provider": "fake",
@@ -213,6 +217,7 @@ def build_runtime(fake: bool, *, langfuse: bool) -> Runtime | str:
                 "prompt_version": prompt.version,
                 "prompt_sha256": prompt.sha256,
                 "max_tokens": agent_settings.extract_max_tokens,
+                "reasoning_effort": agent_settings.extract_reasoning_effort,
             },
             "validator": {
                 "provider": vsettings.llm_provider,
@@ -223,6 +228,7 @@ def build_runtime(fake: bool, *, langfuse: bool) -> Runtime | str:
             },
         },
         _owned=list(tel.values()),
+        _extractor=extractor,
     )
 
 
@@ -484,7 +490,9 @@ def _run_evaluators(state: State, phase: str) -> list[Callable[..., Any]]:
 # ── Orchestration ─────────────────────────────────────────────────────
 
 
-def _dataset_items(cases: list[Case], dataset_name: str) -> list[dict[str, Any]]:
+def _dataset_items(
+    cases: list[Case], dataset_name: str, golden_version: str = GOLDEN_VERSION
+) -> list[dict[str, Any]]:
     items = []
     for case in cases:
         items.append(
@@ -497,7 +505,7 @@ def _dataset_items(cases: list[Case], dataset_name: str) -> list[dict[str, Any]]
                 },
                 "expected_output": case.expected.model_dump(mode="json"),
                 "metadata": {
-                    "golden_version": GOLDEN_VERSION,
+                    "golden_version": golden_version,
                     "category": case.category,
                     "split": case.split,
                     "clarify_is_safe": case.clarify_is_safe,
@@ -546,9 +554,10 @@ def _run_phase(
         try:
             result = lf.run(
                 name=label if rt.mode == "live" else f"DRYRUN fake models {label}",
-                run_name=f"{label} {GOLDEN_VERSION} {run_meta['run_id']}",
+                run_name=f"{label} {run_meta['golden_version']} {run_meta['run_id']}",
                 description=(
-                    f"T-14 {label}: {GOLDEN_VERSION}, {rt.mode} models, same captured drafts"
+                    f"T-14 {label}: {run_meta['golden_version']}, {rt.mode} models, "
+                    "same captured drafts"
                 ),
                 items=lf.items_for(order),
                 task=task,
@@ -684,6 +693,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out", type=Path, default=None, help="results directory")
     parser.add_argument("--trial", type=int, default=1, help="trial number (run naming)")
     parser.add_argument(
+        "--suite", choices=(GOLDEN_VERSION, "phase2-dev-v1"), default=GOLDEN_VERSION,
+        help="original baseline or separately reported development-exposed follow-ups",
+    )
+    parser.add_argument(
         "--langfuse-dry-run",
         action="store_true",
         help="with --fake: export to Langfuse under a separate '-dryrun' dataset (plumbing check)",
@@ -693,8 +706,12 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--langfuse-dry-run requires --fake")
 
     warnings.filterwarnings("ignore", message="You should not use the 'timeout' argument")
-    cases = load_cases()
-    problems = coverage_problems(cases)
+    cases_path = (
+        CASES_PATH if args.suite == GOLDEN_VERSION else CASES_PATH.with_name("phase2-cases.jsonl")
+    )
+    all_cases = load_cases(cases_path)
+    cases = all_cases
+    problems = coverage_problems(cases) if args.suite == GOLDEN_VERSION else []
     if args.case:
         unknown = set(args.case) - {c.id for c in cases}
         if unknown:
@@ -704,9 +721,16 @@ def main(argv: list[str] | None = None) -> int:
 
     started = datetime.now(UTC)
     mode = "fake" if args.fake else "live"
-    run_id = f"{started.strftime('%Y%m%dT%H%M%SZ')}-{mode}-t{args.trial}"
+    run_id = f"{started.strftime('%Y%m%dT%H%M%S.%fZ')}-{mode}-t{args.trial}"
+    out_dir = args.out or (RESULTS_DIR / run_id)
+    if out_dir.exists() and any(out_dir.iterdir()):
+        print(
+            "[BLOCKER] output directory is not empty; historical results will not be overwritten."
+        )
+        return 2
+    out_dir.mkdir(parents=True, exist_ok=True)
     use_langfuse = args.langfuse_dry_run or (not args.fake and not args.no_langfuse)
-    dataset_name = DATASET_NAME + ("-dryrun" if args.fake else "")
+    dataset_name = f"dcta-{args.suite}" + ("-dryrun" if args.fake else "")
     rt = build_runtime(args.fake, langfuse=use_langfuse)
     if isinstance(rt, str):
         print(f"[BLOCKER] {rt}; nothing was run.")
@@ -719,12 +743,14 @@ def main(argv: list[str] | None = None) -> int:
     order = [c.id for c in cases]
     run_meta = {
         "run_id": run_id,
-        "golden_version": GOLDEN_VERSION,
-        "cases_sha256": file_sha256(CASES_PATH),
+        "golden_version": args.suite,
+        "cases_sha256": file_sha256(cases_path),
         "mode": mode,
         "trial": str(args.trial),
         "extract_model": rt.meta["extractor"]["model"],
         "extract_prompt_sha256": rt.meta["extractor"]["prompt_sha256"],
+        "extract_reasoning_effort": rt.meta["extractor"]["reasoning_effort"] or "unset",
+        "extract_max_tokens": str(rt.meta["extractor"]["max_tokens"]),
         "validate_model": rt.meta["validator"]["model"],
         "validator_prompt_hash": rt.meta["validator"]["prompt_hash"],
     }
@@ -739,13 +765,13 @@ def main(argv: list[str] | None = None) -> int:
             try:
                 lf_info["dataset"] = lf.publish(
                     dataset_name,
-                    description=f"DCTA T-14 golden set {GOLDEN_VERSION} (synthetic data only)"
+                    description=f"DCTA T-14 golden set {args.suite} (synthetic data only)"
                     + (" - DRY RUN with fake models, not results" if args.fake else ""),
                     metadata={
                         "golden_version": GOLDEN_VERSION,
                         "cases_sha256": run_meta["cases_sha256"],
                     },  # fmt: skip
-                    items=_dataset_items(load_cases(), dataset_name),
+                    items=_dataset_items(all_cases, dataset_name, args.suite),
                 )
             except Exception as exc:  # noqa: BLE001
                 lf_info["errors"].append(f"publish dataset: {error_text(exc)}")
@@ -780,7 +806,7 @@ def main(argv: list[str] | None = None) -> int:
             "finished_at": finished.isoformat(timespec="seconds"),
             "wall_s": round(time.monotonic() - t0, 1),
             "git_head": _git_head(),
-            "golden_version": GOLDEN_VERSION,
+            "golden_version": args.suite,
             "cases_sha256": run_meta["cases_sha256"],
             "cases_run": len(records),
             "cases_selected": len(order),
@@ -794,10 +820,10 @@ def main(argv: list[str] | None = None) -> int:
         "langfuse": lf_info if use_langfuse else {},
         "records": records,
     }
-    out_dir = args.out or (RESULTS_DIR / run_id)
-    out_dir.mkdir(parents=True, exist_ok=True)
-    (out_dir / "results.json").write_text(json.dumps(results, indent=2, ensure_ascii=False))
-    (out_dir / "report.md").write_text(render_markdown(results))
+    with (out_dir / "results.json").open("x") as output:
+        output.write(json.dumps(results, indent=2, ensure_ascii=False))
+    with (out_dir / "report.md").open("x") as output:
+        output.write(render_markdown(results))
     s = results["summary"]["extraction"]["all"]
     v = results["summary"]["validator"]["all"]
     print(

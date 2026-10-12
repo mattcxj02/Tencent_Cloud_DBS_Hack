@@ -4,6 +4,8 @@ Pytest suite (`make test` or `uv run pytest -q`). Each test uses its own tempora
 
 | File | Covers |
 |---|---|
+| `test_phase4_deadlines.py` | Overall/provider budgets (200 ms scheduling/audit tolerance), expired admission, late output/callback refusal, disconnect/cancel/edit guards, transactional freeze rollback, same-revision deduplication, validation-only reuse, rate/attempt limits, permanent-error refusal and edit/bank/calculation/mandate/quote invalidation |
+| `test_readiness.py`, `test_dev.py` | Preflight failures with zero extractor calls; token mismatch, missing models, bounded stalled checks, healthy drafting without step-up secrets, secret-free responses/logs, extractor timeout/retry settings; supervisor shutdown including grandchildren and unrelated-process survival |
 | `test_health.py` | Service health endpoints, no secrets in responses |
 | `test_money.py`, `test_schemas.py`, `test_amount_expr.py` | Money rules, schema validation, relative-amount resolution |
 | `test_canonical_golden.py` | Pinned canonical bytes, bundle hash and approval challenge |
@@ -25,6 +27,7 @@ Pytest suite (`make test` or `uv run pytest -q`). Each test uses its own tempora
 | `test_amounts.py` | Amount phrase parser |
 | `test_agent_workflow.py`, `test_agent_units.py`, `test_agent_telemetry.py`, `agent_support.py` | Agent graph with a fake LLM and fake gateway: all actions, clarifications (two Johns, missing source, ambiguous "half of it"), corrections, injection in references, malformed model output; tracing |
 | `test_agent_gateway_integration.py` | Agent against the real gateway routes and evidence checker |
+| `test_structured_clarification.py` | Grouped recipient/source choices, no second extraction, final validation, corrections/dependencies and forged/foreign/stale/ambiguous/wrong-leg or field selections through real gateway routes |
 | `test_t10_gateway_validation.py`, `test_t10_validation_telemetry.py`, `t10_support.py` | Gateway validation coordinator: MATCH bound to the exact bundle/conversation/bank labels, MISMATCH/UNCERTAIN/ERROR handling with bounded retries, no client-supplied verdicts, supersession, forced-MATCH attacks still rejected by the gateway, full happy path; validator traces |
 | `test_t10_validator.py`, `test_t10_validator_client.py` | Validator service: strict output checks (every malformed/contradictory reply → ERROR), service token, size limits, prompt/data separation; gateway client re-checks `input_hash` |
 | `validator_fakes.py` | Fake LLMs for validator tests, incl. `AlwaysMatchLLM` for forced-MATCH attack tests |
@@ -36,3 +39,13 @@ Pytest suite (`make test` or `uv run pytest -q`). Each test uses its own tempora
 | `test_t05_approval.py` | Valid approval (signature verified but blocked), wrong owner/origin/RP/challenge, tampered payload, double approval, fail-closed hooks |
 
 Container-level isolation is checked separately by `make isolation-probe` (Docker required).
+
+Phase 6: `test_phase6_calculations.py` covers frozen arithmetic inputs, exact-money rejection, ordered dependencies, equity debit rounding, input hashes, changed balances before/during/after validation and approval, and scam step-up after semantic MATCH. Enrollment tests cover cancellation/rebegin, verification rollback, persistent five-begin limits, code/challenge expiry, sibling and same-challenge races, replay, code binding and additive upgrades. Fake models establish deterministic behavior only.
+
+Phase 5: `test_phase5_progress.py` holds fake extraction, resolution, validation and ASR
+at real stage boundaries. It verifies elapsed/completed recovery, owner/revision
+scoping, stale input and changed bank-binding rejection, needs-input/configuration
+outcomes, explicit frozen validation retry, and cancellation/late-callback safety
+while an existing committed receipt remains retrievable. The client surface allowlist
+includes only the added progress-report method; it grants no execution capability.
+Run with `uv run pytest tests/test_phase5_progress.py -q` or the full `make test`.

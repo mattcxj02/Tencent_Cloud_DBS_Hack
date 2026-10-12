@@ -38,7 +38,15 @@ from pydantic import (
 )
 
 from shared.canonical import canonical_bytes
-from shared.schemas import FrozenBundle
+from shared.deadline import (
+    DEADLINE_HEADER,
+    DeadlineExpired,
+    check_deadline,
+    current_deadline,
+    remaining_timeout,
+)
+from shared.money import Money
+from shared.schemas import AmountExpr, FractionOfLeg, FrozenBundle, RemainingBalance
 
 __all__ = [
     "VALIDATE_PATH",
@@ -57,6 +65,8 @@ __all__ = [
     "AccountLabel",
     "TargetLabel",
     "BankMetadata",
+    "CalculationDebit",
+    "CalculationEvidence",
     "ValidationRequest",
     "EvidenceSpan",
     "ValidationIssue",
@@ -127,6 +137,7 @@ ErrorCode = Literal[
     "BANK_METADATA_INCOMPLETE",  # 422: a leg's source account or target has no bank label
     # Model call failed or its output was rejected (HTTP 200, status ERROR).
     "LLM_NOT_CONFIGURED",
+    "LLM_CONFIGURATION_ERROR",
     "LLM_TIMEOUT",
     "LLM_PROVIDER_ERROR",
     "LLM_EMPTY_OUTPUT",
@@ -228,6 +239,23 @@ class BankMetadata(_Contract):
         return self
 
 
+class CalculationDebit(_Contract):
+    leg_id: Id
+    source_account_id: Id
+    amount: Money
+
+
+class CalculationEvidence(_Contract):
+    """Gateway-frozen inputs to a derived amount, never extractor reasoning."""
+
+    leg_id: Id
+    expression: AmountExpr
+    balance_snapshot: Money | None = None
+    preceding_debits: list[CalculationDebit] = Field(default_factory=list, max_length=3)
+    dependencies: list[CalculationDebit] = Field(default_factory=list, max_length=3)
+    result: Money
+
+
 class ValidationRequest(_Contract):
     """``POST /internal/validate`` body. Built by the gateway from its own records only."""
 
@@ -235,6 +263,7 @@ class ValidationRequest(_Contract):
     conversation: ConversationSnapshot
     bundle: FrozenBundle
     bank_metadata: BankMetadata
+    calculation_evidence: list[CalculationEvidence] = Field(default_factory=list, max_length=4)
 
 
 # ── Model output and result ──────────────────────────────────────────
@@ -359,7 +388,52 @@ def request_problem(request: ValidationRequest) -> ErrorCode | None:
     for leg in bundle.legs:
         if leg.source_account_id not in accounts or leg.target_id not in targets:
             return "BANK_METADATA_INCOMPLETE"
+    if not _calculations_are_consistent(request):
+        return "INVALID_REQUEST"
     return None
+
+
+def _calculations_are_consistent(request: ValidationRequest) -> bool:
+    seen = set()
+    preceding = []
+    inputs = []
+    by_leg = {e.leg_id: e for e in request.calculation_evidence}
+    if len(by_leg) != len(request.calculation_evidence):
+        return False
+    for leg in request.bundle.legs:
+        # The amount resolver uses the requested equity budget before share rounding.
+        amount = leg.equity_terms.budget if leg.equity_terms else leg.amount
+        item = by_leg.get(leg.leg_id)
+        if item is not None:
+            seen.add(leg.leg_id)
+            expr = item.expression
+            if isinstance(expr, RemainingBalance):
+                debits = [d for d in preceding if d.source_account_id == expr.account_id]
+                if item.balance_snapshot is None or expr.account_id != leg.source_account_id:
+                    return False
+                expected = item.balance_snapshot.value - sum(d.amount.value for d in debits)
+                if item.preceding_debits != debits or item.dependencies != debits:
+                    return False
+            elif isinstance(expr, FractionOfLeg):
+                deps = [d for d in inputs if d.leg_id == expr.leg_id]
+                if len(deps) != 1 or item.dependencies != deps:
+                    return False
+                if item.preceding_debits or item.balance_snapshot is not None:
+                    return False
+                expected = Money.quantize_down(
+                    deps[0].amount.value * expr.numerator / expr.denominator
+                ).value
+            else:
+                return False
+            if expected != item.result.value or item.result != amount:
+                return False
+        inputs.append(CalculationDebit(
+            leg_id=leg.leg_id, source_account_id=leg.source_account_id, amount=amount,
+        ))
+        preceding.append(CalculationDebit(
+            leg_id=leg.leg_id, source_account_id=leg.source_account_id, amount=leg.amount,
+        ))
+    return seen == set(by_leg)
 
 
 def verdict_problem(
@@ -414,12 +488,40 @@ class ValidatorClient:
         http_client: httpx.Client | None = None,
     ) -> None:
         self._url = base_url.rstrip("/") + VALIDATE_PATH
+        self._ready_url = base_url.rstrip("/") + "/internal/ready"
         self._token = service_token or ""
         self._timeout = timeout_seconds
         self._http = http_client
 
     def __repr__(self) -> str:  # never show the token
         return f"ValidatorClient(url={self._url!r})"
+
+    def readiness(self, *, timeout_seconds: float = 2.0) -> str | None:
+        """Non-model authenticated check. Only allowlisted codes leave this client."""
+        if len(self._token) < 32:
+            return "SERVICE_TOKEN_UNSET"
+        try:
+            headers = {"Authorization": f"Bearer {self._token}"}
+            if self._http is not None:
+                response = self._http.get(
+                    self._ready_url, headers=headers, timeout=timeout_seconds
+                )
+            else:
+                with httpx.Client(follow_redirects=False) as client:
+                    response = client.get(
+                        self._ready_url, headers=headers, timeout=timeout_seconds
+                    )
+            if response.status_code == 401:
+                return "VALIDATOR_AUTH_FAILED"
+            if response.status_code == 503:
+                code = response.json().get("code")
+                if code in ("SERVICE_TOKEN_UNSET", "LLM_NOT_CONFIGURED"):
+                    return code
+            if response.status_code == 200 and response.json() == {"status": "ready"}:
+                return None
+        except (httpx.HTTPError, ValueError, AttributeError):
+            pass
+        return "VALIDATOR_UNAVAILABLE"
 
     def validate(self, request: ValidationRequest) -> ValidationResult:
         input_hash = validation_input_hash(request)
@@ -433,8 +535,10 @@ class ValidatorClient:
             return _error(input_hash, "CONTEXT_LIMIT_RESTATE")
 
         try:
+            check_deadline()
             response = self._post(body)
-        except httpx.TimeoutException:
+            check_deadline()
+        except (httpx.TimeoutException, DeadlineExpired):
             return _error(input_hash, "VALIDATOR_TIMEOUT")
         except httpx.HTTPError:
             return _error(input_hash, "VALIDATOR_UNAVAILABLE")
@@ -463,7 +567,11 @@ class ValidatorClient:
 
     def _post(self, body: bytes) -> httpx.Response:
         headers = {"Authorization": f"Bearer {self._token}", "Content-Type": "application/json"}
+        timeout = remaining_timeout(self._timeout)
+        budget = current_deadline.get()
+        if budget is not None:
+            headers[DEADLINE_HEADER] = budget.header()
         if self._http is not None:
-            return self._http.post(self._url, content=body, headers=headers, timeout=self._timeout)
-        with httpx.Client(timeout=self._timeout, follow_redirects=False) as client:
+            return self._http.post(self._url, content=body, headers=headers, timeout=timeout)
+        with httpx.Client(timeout=timeout, follow_redirects=False) as client:
             return client.post(self._url, content=body, headers=headers)

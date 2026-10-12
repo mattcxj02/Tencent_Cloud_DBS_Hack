@@ -13,6 +13,8 @@ Mutating routes require the ``Origin`` header to equal the configured origin
 from __future__ import annotations
 
 import json
+import secrets
+import sqlite3
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
@@ -93,11 +95,12 @@ async def enroll_begin(
     body: EnrollBeginRequest,
     request: Request,
 ) -> dict[str, Any]:
-    """Begin enrollment: consume the enrollment code and return registration options."""
+    """Begin enrollment: reserve a code-bound challenge and return options."""
     _check_origin(request)
     store = get_identity_store()
+    challenge = secrets.token_bytes(32)
     try:
-        user_id = store.consume_enrollment_code(body.code)
+        user_id = store.begin_enrollment(body.code, challenge)
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -105,11 +108,6 @@ async def enroll_begin(
         ) from None
 
     settings = _get_settings()
-
-    # Generate a random challenge.
-    import secrets
-
-    challenge = secrets.token_bytes(32)
 
     options = generate_registration_options(
         rp_id=settings.rp_id,
@@ -124,9 +122,6 @@ async def enroll_begin(
             user_verification=UserVerificationRequirement.REQUIRED,
         ),
     )
-
-    # Store the challenge server-side.
-    store.store_challenge(challenge, purpose="registration", user_id=user_id)
 
     return json.loads(options_to_json(options))
 
@@ -152,14 +147,6 @@ async def enroll_verify(
             detail=f"malformed credential: {exc}",
         ) from None
 
-    # Consume the stored challenge.
-    user_id = store.consume_challenge(challenge, purpose="registration")
-    if user_id is CHALLENGE_NOT_FOUND:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="challenge not found, expired, or already used",
-        )
-
     try:
         verified = verify_registration_response(
             credential=body.credential,
@@ -178,15 +165,21 @@ async def enroll_verify(
     # Transports come from the browser's credential response, not from
     # VerifiedRegistration (which doesn't carry them).
     transports_raw = body.credential.get("response", {}).get("transports", [])
-    store.store_credential(
-        credential_id=bytes_to_base64url(verified.credential_id),
-        user_id=user_id,
-        public_key=verified.credential_public_key,
-        sign_count=verified.sign_count,
-        transports=transports_raw if isinstance(transports_raw, list) else [],
-        backup_eligible=verified.credential_backed_up,
-        backup_state=verified.credential_backed_up,
-    )
+    try:
+        user_id = store.complete_enrollment(
+            challenge,
+            credential_id=bytes_to_base64url(verified.credential_id),
+            public_key=verified.credential_public_key,
+            sign_count=verified.sign_count,
+            transports=transports_raw if isinstance(transports_raw, list) else [],
+            backup_eligible=verified.credential_backed_up,
+            backup_state=verified.credential_backed_up,
+        )
+    except (ValueError, sqlite3.IntegrityError):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="enrollment expired, used, or credential already registered",
+        ) from None
 
     return {"user_id": user_id, "status": "enrolled"}
 

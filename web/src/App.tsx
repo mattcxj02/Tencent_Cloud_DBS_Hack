@@ -8,12 +8,14 @@ import { EvidencePage } from './components/EvidencePage'
 import { setFacilitatorEnabled, useFacilitatorEnabled } from './components/FacilitatorPanel'
 import { Header } from './components/Header'
 import { MandatePage } from './components/MandatePage'
+import { PayeesPage } from './components/PayeesPage'
 import { navigate, useHashRoute } from './router'
 import type { RouteName } from './router'
 import { AnnouncerProvider, SessionProvider, useSession } from './session'
 
 const TITLE: Record<RouteName, string> = {
   chat: 'Payments assistant',
+  payees: 'Payees and nicknames',
   mandate: 'Mandate settings',
   evidence: 'Evidence trail',
   baseline: 'Baseline prototype',
@@ -44,6 +46,7 @@ function Shell() {
   if (route.name === 'baseline') page = <BaselinePage />
   else if (session.status === 'loading') page = <p className="text-base">Loading…</p>
   else if (session.status !== 'signed-in') page = <SignInPage />
+  else if (route.name === 'payees') page = <PayeesPage />
   else if (route.name === 'mandate') page = <MandatePage />
   else if (route.name === 'evidence') page = <EvidencePage key={route.param ?? ''} conversationId={route.param} />
   else page = <ChatPage />

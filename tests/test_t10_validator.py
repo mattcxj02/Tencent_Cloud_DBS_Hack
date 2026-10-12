@@ -860,9 +860,9 @@ def test_provider_timeout_maps_to_llm_timeout() -> None:
 # ── No bypass surface ────────────────────────────────────────────────
 
 
-def test_only_health_and_validate_routes_exist() -> None:
+def test_only_health_readiness_and_validate_routes_exist() -> None:
     paths = {route.path for route in create_app(settings=make_settings()).routes}
-    assert paths == {"/health", "/internal/validate"}
+    assert paths == {"/health", "/internal/ready", "/internal/validate"}
 
 
 def test_validator_settings_have_no_bypass_switches() -> None:

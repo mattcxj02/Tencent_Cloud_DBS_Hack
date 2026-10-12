@@ -211,6 +211,8 @@ class RogueAgent:
 
     def handle(self, request: httpx.Request) -> httpx.Response:
         """``POST /internal/run`` as the orchestrator calls it."""
+        if request.method == "GET" and request.url.path == "/ready":
+            return httpx.Response(200, json={"status": "ready"}, request=request)
         self.token = request.headers["authorization"].removeprefix("Bearer ")
         self.conversation_id = json.loads(request.content)["conversation_id"]
         snapshot = self.snapshot()
@@ -385,7 +387,9 @@ class Harness:
         db = str(tmp / "dcta.db")
         operator_token = secrets.token_urlsafe(32)
         saved_env = os.environ.get("OPERATOR_TOKEN")
+        saved_validator_token = os.environ.get("VALIDATOR_SERVICE_TOKEN")
         os.environ["OPERATOR_TOKEN"] = operator_token
+        os.environ["VALIDATOR_SERVICE_TOKEN"] = VALIDATOR_TOKEN
         clock = Clock()
         try:
             bank = BankStore(db)
@@ -452,6 +456,10 @@ class Harness:
                 os.environ.pop("OPERATOR_TOKEN", None)
             else:
                 os.environ["OPERATOR_TOKEN"] = saved_env
+            if saved_validator_token is None:
+                os.environ.pop("VALIDATOR_SERVICE_TOKEN", None)
+            else:
+                os.environ["VALIDATOR_SERVICE_TOKEN"] = saved_validator_token
             shutil.rmtree(tmp, ignore_errors=True)
 
     def assert_real_controls(self) -> None:
@@ -953,13 +961,24 @@ def cites_corrected_words(h: Harness) -> Outcome:
     return observe(h.rogue.freezes[-1])
 
 
+def _renew_rogue_token(h: Harness) -> None:
+    """Probe scope/semantic controls with a valid token; completed run tokens are revoked."""
+    from gateway.auth.delegation import get_delegation_issuer
+    from gateway.orchestration import AGENT_SCOPES
+
+    h.rogue.token = get_delegation_issuer().issue_token(
+        "user-matthew", list(AGENT_SCOPES), conversation_id=h.rogue.conversation_id,
+    )
+
+
 @attack(
     id="EX-12", group=_EX, title="Agent forges a MATCH verdict",
     controls="agent token", expected="only a gateway-held MATCH",
     want=(409, "SEMANTIC_VALIDATION_REQUIRED"), invariants="I8",
 )  # fmt: skip
 def forged_verdict(h: Harness) -> Outcome:
-    conv, _ = h.ready(MUM_50_TEXT, MUM_50)  # the rogue holds a live token
+    conv, _ = h.ready(MUM_50_TEXT, MUM_50)
+    _renew_rogue_token(h)
     snapshot = h.rogue.snapshot()
     frozen = h.rogue.freeze(
         [h.rogue.leg_body(MUM_50, last_user_turn(snapshot), 1)], revision=snapshot["revision"]
@@ -989,7 +1008,8 @@ def forged_verdict(h: Harness) -> Outcome:
     want=(403, "TOKEN_CONVERSATION_MISMATCH"), invariants="I1 I2",
 )  # fmt: skip
 def token_other_conversation(h: Harness) -> Outcome:
-    h.ready(MUM_50_TEXT, MUM_50)  # the rogue holds Matthew's live token
+    h.ready(MUM_50_TEXT, MUM_50)
+    _renew_rogue_token(h)
     ana_conv = h.conversation(h.ana)
     ana_turn = h.say(ana_conv, "Send 50 to Dad from my savings", h.ana)
     leg = Leg("50.00", "50", ANA_DAD, "Dad", source_id=ANA_SAVINGS)

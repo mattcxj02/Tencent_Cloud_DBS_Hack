@@ -121,38 +121,106 @@ class IdentityStore:
 
         return code
 
-    def consume_enrollment_code(self, code: str) -> str:
-        """Consume an enrollment code and return the bound user_id.
-
-        Raises ``ValueError`` if the code is wrong, expired, or already used.
-        """
+    def begin_enrollment(self, code: str, challenge: bytes) -> str:
+        """Reserve one of five begins without consuming the 15-minute code."""
         code_hash = _hash_hex(code)
         now = now_utc()
+        conn = self._conn()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            row = self._enrollment_code(conn, code_hash, now)
+            attempts = conn.execute(
+                "SELECT COUNT(*) FROM enrollment_challenges WHERE code_hash = ?", (code_hash,)
+            ).fetchone()[0]
+            if attempts >= 5:
+                raise ValueError("enrollment begin limit reached")
+            from shared.timeutil import from_iso
 
+            expires = min(
+                from_iso(row["expires_at"]), now + timedelta(seconds=CHALLENGE_EXPIRY_SECONDS)
+            )
+            conn.execute(
+                "INSERT INTO auth_challenges "
+                "(challenge_hash, user_id, purpose, created_at, expires_at) "
+                "VALUES (?, ?, 'registration', ?, ?)",
+                (_hash_hex(challenge), row["user_id"], to_iso(now), to_iso(expires)),
+            )
+            conn.execute(
+                "INSERT INTO enrollment_challenges (challenge_hash, code_hash) VALUES (?, ?)",
+                (_hash_hex(challenge), code_hash),
+            )
+            conn.commit()
+            return row["user_id"]
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    @staticmethod
+    def _enrollment_code(conn: sqlite3.Connection, code_hash: str, now: datetime) -> sqlite3.Row:
+        from shared.timeutil import from_iso
+
+        row = conn.execute(
+            "SELECT user_id, expires_at, used_at FROM enrollment_codes WHERE code_hash = ?",
+            (code_hash,),
+        ).fetchone()
+        if row is None:
+            raise ValueError("invalid enrollment code")
+        if row["used_at"] is not None:
+            raise ValueError("enrollment code already used")
+        if from_iso(row["expires_at"]) <= now:
+            raise ValueError("enrollment code expired")
+        return row
+
+    def complete_enrollment(
+        self,
+        challenge: bytes,
+        *,
+        credential_id: str,
+        public_key: bytes,
+        sign_count: int,
+        transports: list[str],
+        backup_eligible: bool,
+        backup_state: bool,
+    ) -> str:
+        """Register a verified credential, consume its code and invalidate siblings atomically."""
+        from shared.timeutil import from_iso
+
+        now = now_utc()
         conn = self._conn()
         try:
             conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
-                "SELECT user_id, expires_at, used_at FROM enrollment_codes WHERE code_hash = ?",
-                (code_hash,),
+                "SELECT c.user_id, c.expires_at, c.consumed_at, e.code_hash "
+                "FROM auth_challenges c JOIN enrollment_challenges e "
+                "ON e.challenge_hash = c.challenge_hash "
+                "WHERE c.challenge_hash = ? AND c.purpose = 'registration'",
+                (_hash_hex(challenge),),
             ).fetchone()
-            if row is None:
-                conn.rollback()
-                raise ValueError("invalid enrollment code")
-            if row["used_at"] is not None:
-                conn.rollback()
-                raise ValueError("enrollment code already used")
-            from shared.timeutil import from_iso
-
-            if from_iso(row["expires_at"]) <= now:
-                conn.rollback()
-                raise ValueError("enrollment code expired")
+            if row is None or row["consumed_at"] is not None or from_iso(row["expires_at"]) <= now:
+                raise ValueError("challenge not found, expired, or already used")
+            code = self._enrollment_code(conn, row["code_hash"], now)
+            if code["user_id"] != row["user_id"]:
+                raise ValueError("enrollment binding mismatch")
+            conn.execute(
+                "INSERT INTO webauthn_credentials "
+                "(credential_id, user_id, public_key, sign_count, transports, "
+                "backup_eligible, backup_state, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (credential_id, code["user_id"], public_key, sign_count, ",".join(transports),
+                 int(backup_eligible), int(backup_state), to_iso(now)),
+            )
             conn.execute(
                 "UPDATE enrollment_codes SET used_at = ? WHERE code_hash = ?",
-                (to_iso(now), code_hash),
+                (to_iso(now), row["code_hash"]),
+            )
+            conn.execute(
+                "UPDATE auth_challenges SET consumed_at = ? WHERE challenge_hash IN "
+                "(SELECT challenge_hash FROM enrollment_challenges WHERE code_hash = ?)",
+                (to_iso(now), row["code_hash"]),
             )
             conn.commit()
-            return row["user_id"]
+            return code["user_id"]
         except Exception:
             conn.rollback()
             raise

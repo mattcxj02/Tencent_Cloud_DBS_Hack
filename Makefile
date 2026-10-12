@@ -1,5 +1,5 @@
 # DCTA Makefile — common development targets
-.PHONY: eval-fake operator reset-db test lint web-build dev seed demo eval smoke-llm smoke-asr smoke-langfuse smoke-validate smoke-telemetry smoke-extract smoke-voice \
+.PHONY: eval-fake operator reset-db upgrade-db test lint web-build dev stop seed eval smoke-llm smoke-asr smoke-langfuse smoke-validate smoke-telemetry smoke-extract smoke-voice \
        compose-build compose-up compose-down isolation-probe enroll-code
 
 # ── Development checks ──
@@ -24,24 +24,26 @@ enroll-code:
 # ── Service startup ──
 
 dev:
-	@echo "Starting agent (8001), gateway (8002), validator (8003)…"
-	uv run uvicorn agent.app:app --port 8001 --reload &
-	uv run uvicorn gateway.app:app --port 8002 --reload &
-	uv run uvicorn validator.app:app --port 8003 --reload
+	uv run python scripts/dev.py
 
-# ── Placeholders (implemented in later tasks) ──
+stop:
+	uv run python scripts/dev.py stop
+
+# ── Data and evaluations ──
 
 seed:
 	uv run python -m ledger.cli
+
+# Bring an existing database up to date (new tables, new seed aliases) and keep
+# enrolled passkeys, conversations and history. Safe to run more than once.
+upgrade-db:
+	uv run python -m ledger.cli --upgrade
 
 # Delete the local database and start fresh (needed once passkeys/authorizations exist,
 # because the seed cannot delete users they reference).
 reset-db:
 	rm -f $${DCTA_DB_PATH:-data/dcta.db} $${DCTA_DB_PATH:-data/dcta.db}-wal $${DCTA_DB_PATH:-data/dcta.db}-shm
 	$(MAKE) seed
-
-demo:
-	@echo "Demo: pending T-11 (React confirmation, mandate, evidence views)"
 
 eval:
 	uv run python -m evals.run

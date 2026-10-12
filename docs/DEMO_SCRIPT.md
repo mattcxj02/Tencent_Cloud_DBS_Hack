@@ -36,7 +36,7 @@ Utterances in **bold** were run live as typed text, through the real API or the 
 
 ## Fallback lines
 
-- **The model is slow (over 15 s):** "The drafting model reasons before it answers. In our 35-case run its median was about 9 seconds and the slowest was 29; the gateway waits up to 45." Keep talking over the "Preparing your draft and checking it independently…" notice. Do not cut mid-wait in a single-take recording; edit it out afterwards.
+- **The model is slow (over 10 s):** "The screen shows the real stage it is at. With reasoning off, drafting usually takes about 2 seconds; the gateway gives the whole draft at most 90." Check that `EXTRACT_REASONING_EFFORT=no_think` is set before recording. Keep talking over the "Preparing your draft and checking it independently…" notice. Do not cut mid-wait in a single-take recording; edit it out afterwards.
 - **TRTC mishears a word:** "Speech recognition got that wrong, so I correct it. Nothing is drafted from words I haven't seen." Then use **Correct this**. That is the designed path.
 - **Voice unavailable:** "Voice is just an input channel. Typing goes through exactly the same checks." Type the same sentence.
 - **An unexpected clarifying question:** answer it, for example by naming the account. "It asks rather than assumes."
@@ -51,4 +51,4 @@ Lost response after commit (reload shows the stored receipt). Double-click on Ap
 
 ## Live Demo Day cut (about 4 minutes)
 
-Scene 1 (20 s), then Scene 4 (Johns, step-up), Scene 6 (block), Scene 7 (Rogue Agent Mode) and Scene 9 (the two numbers: 31 → 0 wrong drafts, 5/25 false holds). Have the recorded video ready as a backup in case of venue network or audio problems. Use a headset microphone, since a hall's echo hurts ASR, or type.
+Scene 1 (20 s), then Scene 4 (Johns, step-up), Scene 6 (block), Scene 7 (Rogue Agent Mode) and Scene 9 (the numbers: 30 → 0 wrong drafts, false holds cut from 5/25 to 0/24, extraction down from about 9 s to about 2 s). Have the recorded video ready as a backup in case of venue network or audio problems. Use a headset microphone, since a hall's echo hurts ASR, or type.

@@ -3,14 +3,17 @@
 Two different questions are answered here:
 
 1. **Resolution** (what did the user mean?). Strong names (full payee name, alias, masked
-   suffix, account type, stock code) beat weak ones (one word of a payee's name, "card").
-   "John Doe" therefore means John Doe even though "John" alone matches two payees.
-   More than one remaining candidate, or none, means the agent asks.
+   suffix, account type, stock code; for payees also bank aliases and the customer's
+   nicknames) beat weak ones (one word of a payee's name, "card"). "John Doe" therefore
+   means John Doe even though "John" alone matches two payees. More than one remaining
+   candidate, or none, means the agent asks; with none, near spellings ("mom" ~ "Mum")
+   become a "Did you mean …?" question, never a choice.
 2. **Citation** (which words prove it?). The gateway accepts a target/source citation only
    if the cited words name exactly one record of that kind under a flat rule (any name,
-   any word). :func:`narrow_citation` mirrors that rule and, if the whole quote names
-   several records (e.g. "John Doe" also contains "John"), picks the longest sub-span of
-   the user's words that names only the resolved record (e.g. "Doe" or "4521").
+   any word; :mod:`shared.names`). :func:`narrow_citation` applies that rule and, if the
+   whole quote names several records (e.g. "John Doe" also contains "John"), picks the
+   longest sub-span of the user's words that names only the resolved record (e.g. "Doe"
+   or "4521").
 
 The gateway remains authoritative; if this mirror disagrees, the gateway rejects the
 proposal and the agent turns the rejection into a question.
@@ -24,6 +27,8 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from agent.turns import Span
+from shared.names import fuzzy_mentions
+from shared.names import mentions as shared_mentions
 
 __all__ = [
     "Record",
@@ -38,6 +43,7 @@ __all__ = [
     "payee_queries",
     "payee_record",
     "sgx_records",
+    "suggest_records",
 ]
 
 RecordKind = Literal["own_account", "bank_payee", "paynow_payee", "biller", "card", "sgx"]
@@ -50,7 +56,6 @@ SGX_NAMES: dict[str, tuple[str, ...]] = {
     "Z74": ("singtel",),
 }
 
-_WORD_RE = re.compile(r"[a-z0-9]+")
 _TOKEN_RE = re.compile(r"[0-9A-Za-z]+")
 _MAX_NARROW_TOKENS = 12
 _QUERY_STOPWORDS = frozenset(
@@ -98,14 +103,9 @@ class Record:
         return self.strong + self.weak
 
 
-def _norm(text: str) -> str:
-    return " ".join(_WORD_RE.findall(text.casefold()))
-
-
 def mentions(text: str, names: Iterable[str]) -> bool:
-    """True if any name appears in *text* as a whole word or phrase (gateway rule)."""
-    haystack = f" {_norm(text)} "
-    return any((n := _norm(name)) and f" {n} " in haystack for name in names)
+    """True if any name appears in *text* as whole words (the gateway's rule, shared)."""
+    return shared_mentions(text, names)
 
 
 def match_records(text: str, records: Iterable[Record]) -> list[Record]:
@@ -115,6 +115,15 @@ def match_records(text: str, records: Iterable[Record]) -> list[Record]:
     if strong:
         return strong
     return [r for r in records if mentions(text, r.weak)]
+
+
+def suggest_records(text: str, records: Iterable[Record]) -> list[Record]:
+    """Records whose names are a near spelling of the user's words ("mom" ~ "Mum").
+
+    Only for a "Did you mean …?" question: the gateway never accepts a near spelling as
+    evidence, so the customer's answer must name the record exactly.
+    """
+    return [r for r in records if fuzzy_mentions(text, r.names)]
 
 
 def narrow_citation(span: Span, record: Record, peers: Sequence[Record]) -> Span | None:

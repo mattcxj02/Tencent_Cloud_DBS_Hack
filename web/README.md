@@ -37,7 +37,8 @@ The footer toggles a **facilitator timer** on the chat page (local only). It rec
 | `src/components/Chat.tsx` | Chat orchestration: turn capture, draft requests, stale-response guard (epoch + conversation revision), no double submits |
 | `src/components/Transcript.tsx` | Visible turns (latest correction at the original's position, earlier versions disclosed) and the inline correction editor |
 | `src/components/Composer.tsx` | Text input and microphone button: one-time recording consent, 60 s auto-send, Esc to discard |
-| `src/components/ClarifyCard.tsx` | Clarification question + option chips |
+| `src/components/ClarifyCard.tsx` | Grouped recipient/source choices with explicit IDs and leg labels, complete-group submission, none-of-these and free-text fallback; legacy chips and nickname offers remain supported |
+| `tests/` | Dependency-free synthetic clarification browser regression page; see `tests/README.md` for execution |
 | `src/components/DraftReview.tsx` | Draft that cannot be approved: validator field issues with the user's quoted words, guidance by `next_action` |
 | `src/components/LegList.tsx` | Leg rendering (large amounts, equity terms, changes in words) and total debit |
 | `src/components/Confirmation.tsx` | Envelope issuance, review, passkey approval and every outcome/recovery path |
@@ -65,8 +66,46 @@ Labelled controls and fieldsets, a skip link, and visible 3 px focus outlines. F
 
 ## Limitations
 
-- There is no automated browser test or test runner (by instruction). Checks are `tsc` strict, the production build, and an ad-hoc Node render of the main pages and helpers. A real passkey, microphone and step-up walkthrough must be done manually in a browser (T-11 acceptance).
-- Choice chips are parsed from the question's trailing "…: A, B or C?" list. Options containing ", " or " or " would split wrongly. Typing an answer always works.
+- The clarification browser fixture runs component/API regressions without new dependencies. There is no headless CI browser runner or full payment walkthrough. A real passkey, microphone and step-up walkthrough must be done manually in a browser (T-11 acceptance).
+- Structured choices come from gateway metadata and submit question/field/leg/revision bindings. Older questions still parse trailing "…: A, B or C?" chips; labels containing ", " or " or " can split wrongly there. Typing an answer always works.
 - Draft-to-draft changes are matched by payment position, so reordering shows as changes.
 - The source-account label on the confirmation comes from `/api/accounts`, because the envelope carries account IDs only.
 - The baseline covers transfers, bills and card payments (no equities). Its facilitator timer counts control activations, not keystrokes.
+
+Service setup failures (`SERVICE_TOKEN_UNSET`, `VALIDATOR_AUTH_FAILED`, `SERVICE_CONFIGURATION_INVALID`, `EXTRACTOR_NOT_CONFIGURED`, `LLM_NOT_CONFIGURED`) show service-unavailable/operator guidance in chat and draft review and suppress drafting retry buttons. Transient readiness/service failures still allow retry. The browser cannot repair service credentials.
+
+## Phase 5 progress and recovery
+
+`src/progress.ts` scopes polling to the conversation, revision and operation UUID.
+`ProgressNotice.tsx` shows gateway-reported stages and elapsed time; only stage changes
+use the shared announcer. One outstanding progress read at a time is bounded to 5 s;
+watching stops at completion, cancellation, unmount, 100 reads or 120 s (plus the final
+read/scheduling time). General gateway requests are bounded to 20 s, drafting to 110 s
+and voice upload to 35 s, including response-body reads. A configured backend draft
+budget above 110 s can outlast the POST wait; bounded progress recovery remains
+available. These browser limits are display/recovery limits, not authorization rules.
+
+The tab retains the conversation and current operation for reload. Chat first reads
+the owned evidence view, then restores existing authorization/receipt state through
+`ExistingPayment.tsx` or reads the saved progress outcome. An unavailable payment-state
+lookup offers only “Check existing payment”; it does not claim failure or suggest
+another payment. Recovery of a pending approval uses its existing ID/envelope, and
+rechecks conversation and validation before showing confirmation. Lost approval and
+step-up responses read the stored receipt/status. A receipt closes the conversation.
+Progress records may be evicted or lost on gateway restart; messages and evidence are
+still available and the UI explains that the progress result cannot be restored.
+
+A drafting revision conflict automatically rebuilds once at the latest revision;
+continued changes require a deliberate retry. “Retry validation of saved draft” sends
+validation-only intent and cannot launch extraction; corrections create a revision
+and rebuild the corrected draft. Permanent configuration errors explain operator
+setup and offer no retry loop. Voice transcripts offer “Correct this transcript” and
+explain that saving replaces drafting in progress. Edits abort polling, supersede the
+old backend revision and reject late results, with automatic drafting after save and
+no extra mandatory confirmation click. “Stop preparing draft” affects drafting only;
+approved/committed payments retain their authorization and receipt.
+
+The synthetic regressions are documented in [tests/README.md](tests/README.md).
+For an environment where `node_modules` is a read-only symlink, use
+`npm run build -- --configLoader runner` to avoid Vite writing its temporary bundled
+config into the dependency tree. This does not install or change dependencies.

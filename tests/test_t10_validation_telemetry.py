@@ -94,7 +94,7 @@ def test_validation_is_one_trace_across_gateway_and_validator(v: V) -> None:
         assert gen.attributes["langfuse.observation.type"] == "generation"
         assert gen.attributes["langfuse.observation.model.name"] == "fake-model"
         assert _meta(gen, "prompt_hash") == PROMPT_HASH
-        assert _meta(gen, "prompt_version") == PROMPT_VERSION == "validator-v1"
+        assert _meta(gen, "prompt_version") == PROMPT_VERSION == "validator-v2"
         assert _meta(gen, "validator_verdict") == "MATCH"
         assert _meta(gen, "usage_status") == "unavailable"  # the fake reports no usage
         assert isinstance(_meta(gen, "latency_ms"), int | float)

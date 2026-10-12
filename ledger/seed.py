@@ -16,7 +16,7 @@ import sqlite3
 from ledger.schema import init_db, money_to_cents
 from shared.money import Money
 
-__all__ = ["seed_db"]
+__all__ = ["PAYEE_ALIASES", "seed_db", "upgrade_db"]
 
 #: Fixed synthetic timestamps so the seed is deterministic.
 _SEED_TS = "2026-10-10T00:00:00.000Z"
@@ -36,6 +36,44 @@ _ALL_ACTIONS = "transfer,pay_bill,pay_card,buy_equity"
 _MANDATE_EXPIRES = "2027-12-31T23:59:59.000Z"
 
 
+#: Bank-set payee aliases: (alias, payee_id, owner_user_id).
+PAYEE_ALIASES: list[tuple[str, str, str]] = [
+        ("Mum", "payee-mum", "user-matthew"),
+        ("Ah Ma", "payee-ahma", "user-matthew"),
+        ("mum", "payee-mum", "user-matthew"),  # lowercase alias too
+        ("ah ma", "payee-ahma", "user-matthew"),
+        # Common variants ("ahma" and "Ah-Ma" already match "Ah Ma": spacing is ignored).
+        # Not "Ma": it would also match the "Ma" in "Ah Ma".
+        ("Mom", "payee-mum", "user-matthew"),
+        ("Mummy", "payee-mum", "user-matthew"),
+        ("Mommy", "payee-mum", "user-matthew"),
+        ("Mama", "payee-mum", "user-matthew"),
+        ("Ah Mah", "payee-ahma", "user-matthew"),
+        ("Amah", "payee-ahma", "user-matthew"),
+        ("Grandma", "payee-ahma", "user-matthew"),
+        ("Dad", "payee-ana-dad", "user-ana"),
+        ("Sis", "payee-ana-sis", "user-ana"),
+]
+
+
+def upgrade_db(conn: sqlite3.Connection) -> int:
+    """Bring an existing demo database up to date without wiping it.
+
+    Creates any new tables (``init_db`` is idempotent) and adds seed aliases that are
+    missing, so enrolled passkeys, conversations and history are kept. Returns the
+    number of aliases added.
+    """
+    init_db(conn)
+    before = conn.total_changes
+    conn.executemany(
+        "INSERT OR IGNORE INTO payee_aliases (alias, payee_id, owner_user_id) "
+        "SELECT ?, ?, ? WHERE EXISTS (SELECT 1 FROM payees WHERE payee_id = ?)",
+        [(a, p, u, p) for a, p, u in PAYEE_ALIASES],
+    )
+    conn.commit()
+    return conn.total_changes - before
+
+
 def _truncate_all(conn: sqlite3.Connection) -> None:
     """Delete all rows from every table, in FK-safe order."""
     # Order matters for foreign keys, but PRAGMA foreign_keys=ON with
@@ -49,6 +87,7 @@ def _truncate_all(conn: sqlite3.Connection) -> None:
         "cards",
         "saved_billers",
         "billers",
+        "payee_nicknames",
         "payee_aliases",
         "payees",
         "account_holders",
@@ -142,14 +181,7 @@ def seed_db(conn: sqlite3.Connection) -> None:
     # ── Payee aliases ──
     conn.executemany(
         "INSERT INTO payee_aliases (alias, payee_id, owner_user_id) VALUES (?, ?, ?)",
-        [
-            ("Mum", "payee-mum", "user-matthew"),
-            ("Ah Ma", "payee-ahma", "user-matthew"),
-            ("mum", "payee-mum", "user-matthew"),  # lowercase alias too
-            ("ah ma", "payee-ahma", "user-matthew"),
-            ("Dad", "payee-ana-dad", "user-ana"),
-            ("Sis", "payee-ana-sis", "user-ana"),
-        ],
+        PAYEE_ALIASES,
     )
 
     # ── Billers ──

@@ -49,6 +49,7 @@ from gateway.auth.delegation import DelegationIssuer, _set_delegation_issuer
 from gateway.auth.session import UserPrincipal, require_user_session
 from gateway.bank import BankStore
 from gateway.bank_routes import _set_bank_store
+from gateway.calculations import bound_calculations
 from gateway.clock import utcnow
 from gateway.conv_routes import _set_conversation_store
 from gateway.conversations import ConversationStore
@@ -208,6 +209,9 @@ class RecordingExtractor:
     def __init__(self, inner: ExtractorLLM) -> None:
         self._inner = inner
         self.model = inner.model
+        self.provider = getattr(inner, "provider", None)
+        self.reasoning_effort = getattr(inner, "reasoning_effort", None)
+        self.max_tokens = getattr(inner, "max_tokens", None)
         self.calls: list[dict[str, Any]] = []
 
     def complete(self, system_prompt: str, user_content: str) -> LLMReply:
@@ -457,6 +461,7 @@ def build_wrong_request(env: CaseEnv, bundle: FrozenBundle, wd: WrongDraft) -> V
             conn, bundle.conversation_id, bundle.conversation_revision, bundle.conversation_hash
         )
         metadata = build_bank_metadata(conn, USER, wrong)
+        evidence = bound_calculations(conn, bundle)
     finally:
         conn.close()
     return ValidationRequest(
@@ -464,6 +469,7 @@ def build_wrong_request(env: CaseEnv, bundle: FrozenBundle, wd: WrongDraft) -> V
         conversation=snapshot,
         bundle=wrong,
         bank_metadata=metadata,
+        calculation_evidence=evidence,
     )
 
 

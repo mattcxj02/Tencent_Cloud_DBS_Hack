@@ -95,7 +95,7 @@ Key mechanisms:
 
 ### How the prompts drive the AI
 
-| | Extractor ([prompts/extractor.md](../prompts/extractor.md), `extractor-v1`) | Validator ([prompts/validator.md](../prompts/validator.md), `validator-v1`) |
+| | Extractor ([prompts/extractor.md](../prompts/extractor.md), `extractor-v2`) | Validator ([prompts/validator.md](../prompts/validator.md), `validator-v2`) |
 |---|---|---|
 | Model | TokenHub `hy3` | DeepSeek `deepseek-flash` (a different vendor) |
 | Input | The conversation as a JSON data object | The full ordered conversation (including app questions, corrections and answers), the frozen bundle and the bank's display labels, between fixed data markers. **No extractor output or reasoning** |
@@ -118,27 +118,29 @@ Both prompts are fixed and version-controlled, and their SHA-256 hashes are logg
 
   This has not yet been tested with users.
 
-## 4. Business value: what was measured (10 Oct 2026)
+## 4. Business value: what was measured (10 and 13 Oct 2026)
 
 All results come from live runs with the real models and services on synthetic data.
 
-**Understanding requests** ([T-14](evidence/T-14-results.md); 35-case golden set, one trial; typed text; extractor `hy3`, validator `deepseek-flash`):
+**Understanding requests** (35-case golden set; typed text; extractor `hy3`, validator `deepseek-flash`). The 10 Oct column is the original build ([T-14](evidence/T-14-results.md)); the 13 Oct column is after the improvement work, with the extractor's reasoning turned off and prompt v2 ([T-14-no-think](evidence/T-14-no-think.md)). One trial each; across three improved trials the outcome was 34, 34 and 33 of 35:
 
-| Measure | Result |
-|---|---|
-| Correct outcome (exact draft, or a question about the right field) | **34 / 35** (held-out cases 28/29) |
-| Critical fields exact when a draft was expected (legs, action, target, source, amount) | **25 / 25** |
-| Correct clarifying question when one was needed | 9 / 10. The miss was a safe but generic question for "Apple shares" |
-| Unsafe drafts (wrong critical field, or a draft where a question was required) | **0** |
-| Agent latency per turn | p50 8,972 ms, p95 17,916 ms (n = 35). Almost all of it is the reasoning model call |
-
-**Independent check on the same captured drafts** ([T-14](evidence/T-14-results.md)):
-
-| Measure | Extractor only | Extractor + validator |
+| Measure | 10 Oct | 13 Oct |
 |---|---|---|
-| Deliberately wrong drafts (wrong amount, recipient or source; missing or extra leg) reaching the confirmation screen | 31 / 31 | **0 / 31**: 28 MISMATCH, 1 UNCERTAIN, 2 ERROR (blocked by failing closed, not detected) |
-| Correct drafts held back to ask the customer (false rejects) | 0 / 25 | **5 / 25 (20%)**, all UNCERTAIN. 4 were adversarial cases where the draft was faithful but the conversation contained injected or coercive text. 1 involved "the rest" of a balance, which the validator cannot see |
-| Validator latency on natural drafts | – | p50 1,333 ms, p95 5,567 ms (n = 25) |
+| Correct outcome (exact draft, or a question about the right field) | **34 / 35** | **33 / 35** |
+| Critical fields exact when a draft was expected (legs, action, target, source, amount) | **25 / 25** | 24 / 25 (one unneeded "which account?" question instead) |
+| Unsafe drafts (wrong critical field, or a draft where a question was required) | **0** | **0** |
+| Extractor latency per turn | p50 8.9 s, p95 17.9 s | **p50 2.0 s, p95 3.2 s** |
+| Development-exposed follow-ups ("mom", "ahma", nicknames; reported separately) | – | 6 / 6 |
+
+**Independent check on the same captured drafts**:
+
+| Measure | Extractor only | + validator, 10 Oct (v1) | + validator, 13 Oct (v2) |
+|---|---|---|---|
+| Deliberately wrong drafts (wrong amount, recipient or source; missing or extra leg) reaching the confirmation screen | all | **0 / 31** | **0 / 30** |
+| Correct drafts held back to ask the customer (false rejects) | 0 | 5 / 25 (20%), all UNCERTAIN | **0 / 24** |
+| Validator latency on natural drafts | – | p50 1.3 s, p95 5.6 s | p50 1.9 s, p95 7.6 s (all calls) |
+
+The false rejects fell because the gateway now gives the validator frozen **calculation evidence** for derived amounts such as "the rest" (balance, earlier debits, result), and validator prompt v2 separates "does the draft match the request" from "is this risky", which the gateway's deterministic rules already handle. A tampered derived amount is now refused by the gateway before the model is asked. Testing also found that the validator accepted an Ah Ma → Mum recipient swap 2 times in 4 because it was never shown that Ah Ma is a separate payee; it now sees all saved payees and rejected the swap 4/4.
 
 **Deterministic policy on the 25 captured drafts** ([T-14](evidence/T-14-results.md)): PASS 15, STEP_UP 8, BLOCK 2.
 - The sanctioned payee and the over-mandate-limit payment were **blocked by policy even though the validator returned MATCH**, because both drafts faithfully matched what the customer asked. This is the intended split of duties.
@@ -193,9 +195,9 @@ There is one demo user (plus a second user, Ana, who shares the joint account), 
 
 - **Pending (owner):** a real-browser walkthrough with Touch ID and a microphone (the live end-to-end run used a software passkey over the real API); about 5 usability sessions comparing chat with the conventional baseline page ([kit](../evals/usability/README.md)); the demo video; CodeBuddy screenshots.
 - **Attack testing is finite.** 46 attacks against the real gateway with a malicious extractor and a validator forced to answer MATCH: all 46 controls held; the ledger was unchanged in 42 rows and the 4 retry/race rows produced exactly one legitimate commit ([matrix](evidence/T-13-attack-matrix.md)). Residual risks noted there: a valid citation does not prove meaning ("Mum lent me 500" can be drafted as 500, which the customer then sees and must reject); a reference the agent does not declare is not checked against the amount (the passkey and step-up still apply); the hash chain does not detect a privileged full rewrite.
-- **Latency.** A reasoning-model turn takes p50 about 9 s, and up to 29.0 s in the T-14 run. The gateway allows 45 s.
-- **Validator false rejects.** 20% of correct drafts were held back, mostly where injected text was present. The validator is not given balances, so it cannot verify "the rest".
-- **Small evaluation.** n = 35 cases, one trial, typed English and hand-made wrong drafts. These numbers are not a security proof.
+- **Latency.** With reasoning off, extraction takes p50 about 2 s (p95 about 3 s). With reasoning on (the code default when `EXTRACT_REASONING_EFFORT` is unset) it was p50 about 9–11 s and up to 31 s. Drafting has one 90 s overall deadline. Complete voice-to-ready time has not been measured separately.
+- **Validator limits.** False rejects fell from 5/25 to 0/24 in one trial. The validator still occasionally runs out of output tokens on 4-leg drafts; this blocks the draft (fails closed) rather than detecting the error.
+- **Small evaluation.** n = 35 cases, one to three trials per configuration, typed English and hand-made wrong drafts. Extractor prompt v2's new rule was written after seeing one held-out case (`adv-07`), which is now development-exposed. These numbers are not a security proof.
 - **The confirmation is application UI**, not a browser-protected payment display (this is not Secure Payment Confirmation). Passkey user verification may be a PIN.
 - **The audit chain is tamper-evident only** relative to retained history. It is not proof against a privileged full rewrite, and there are no external checkpoints.
 - **Scam rules are keyword heuristics**, with both false positives and false negatives.

@@ -71,15 +71,15 @@ export function SignInPage() {
 
   return (
     <div className="space-y-4">
-      <PageTitle sub="Prototype on a simulated bank. Your passkey (Touch ID) stays on this device.">Sign in</PageTitle>
+      <PageTitle sub="Prototype on a simulated bank. Your passkey (Touch ID, Windows Hello or a security key) stays on this device.">Sign in</PageTitle>
       {notice && <Notice kind="warning" title={notice} />}
       {error && <Notice kind="error" title={error} focus />}
       {enrolled && <Notice kind="success" title={`Passkey registered for ${enrolled}. Now sign in.`} />}
 
       <Card title="Sign in with your passkey" titleId="signin-heading">
-        <p className="mb-3 text-base">Use Touch ID or your device's passkey prompt.</p>
-        <Button ref={signInRef} onClick={() => void signIn()} busy={busy === 'signin'} busyLabel="Waiting for Touch ID…" disabled={busy !== null}>
-          Sign in with Touch ID / passkey
+        <p className="mb-3 text-base">Use Touch ID, Windows Hello or your device's passkey prompt.</p>
+        <Button ref={signInRef} onClick={() => void signIn()} busy={busy === 'signin'} busyLabel="Waiting for your passkey…" disabled={busy !== null}>
+          Sign in with passkey (Touch ID / Windows Hello)
         </Button>
       </Card>
 

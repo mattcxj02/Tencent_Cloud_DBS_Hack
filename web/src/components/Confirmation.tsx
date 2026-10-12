@@ -5,7 +5,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api, ApiError } from '../api'
 import type { ApproveResult, AuthorizationView, CommittedResult, DraftBundle } from '../api'
-import { describeCode, describeCodes, splitCode } from '../messages'
+import { describeCode, describeCodes, isConfigurationError, splitCode } from '../messages'
 import { diffLegs, fromDraftLeg, fromEnvelopeLeg } from '../legs'
 import type { LegView } from '../legs'
 import { formatMoney } from '../money'
@@ -45,8 +45,12 @@ export function Confirmation({
   onClose,
   onCommitted,
   onFinished,
+  existingAuthorizationId,
+  onPendingChange,
 }: {
   draft: DraftBundle
+  existingAuthorizationId?: string
+  onPendingChange?: (pending: boolean) => void
   prevLegs: LegView[] | null
   onEdit: () => void
   onRedraft: () => void
@@ -75,6 +79,11 @@ export function Confirmation({
     }
   }, [])
 
+  useEffect(() => {
+    onPendingChange?.(BUSY.has(phase.kind) || phase.kind === 'unknown' || phase.kind === 'step-up')
+  }, [phase.kind, onPendingChange])
+  useEffect(() => () => onPendingChange?.(false), [onPendingChange])
+
   const legs = useMemo(
     () => (authz ? authz.envelope.payload.legs.map((l) => fromEnvelopeLeg(l, accounts ?? [])) : []),
     [authz, accounts],
@@ -98,12 +107,44 @@ export function Confirmation({
     setInlineError(null)
     setPhase({ kind: 'issuing' })
     try {
-      const view = await api.createAuthorization(draft.bundle_id, credentialId)
+      const view = existingAuthorizationId
+        ? await api.authorization(existingAuthorizationId)
+        : await api.createAuthorization(draft.bundle_id, credentialId)
       if (!mounted.current) return
       const issuedAt = parseIso(view.envelope.issued_at)
       setSkewMs(issuedAt === null ? 0 : issuedAt - Date.now())
       warned.current = false
       setAuthz(view)
+      if (view.status === 'COMMITTED') {
+        const result = await api.receipt(view.authorization_id)
+        if (!mounted.current) return
+        setPhase({ kind: 'committed', result, recovered: true })
+        onCommitted()
+        void refreshAccounts()
+        return
+      }
+      if (view.status === 'AWAITING_STEP_UP') {
+        setPhase({ kind: 'step-up', reasonCodes: view.reason_codes })
+        return
+      }
+      if (view.status !== 'PENDING_APPROVAL') {
+        setPhase(view.status === 'CANCELLED' ? { kind: 'cancelled' } : { kind: 'stale', code: `AUTHORIZATION_${view.status}` })
+        return
+      }
+      const conversation = await api.conversation(view.envelope.payload.conversation_id)
+      if (!mounted.current) return
+      if (conversation.revision !== view.envelope.payload.conversation_revision) {
+        setPhase({ kind: 'stale', code: 'AUTHORIZATION_SUPERSEDED' })
+        return
+      }
+      if (existingAuthorizationId) {
+        const validation = await api.validation(view.envelope.payload.bundle_id)
+        if (!mounted.current) return
+        if (!validation.eligible_for_confirmation || validation.next_action !== 'CONFIRM') {
+          setPhase({ kind: 'stale', code: 'SEMANTIC_VALIDATION_REQUIRED' })
+          return
+        }
+      }
       setPhase({ kind: 'review' })
       announce(
         `Confirmation ready: ${view.envelope.payload.legs.length} payments. Review every line, then approve within 2 minutes.`,
@@ -123,7 +164,7 @@ export function Confirmation({
     } finally {
       inFlight.current = false
     }
-  }, [credentialId, draft.bundle_id, announce])
+  }, [credentialId, draft.bundle_id, announce, existingAuthorizationId, onCommitted, refreshAccounts])
 
   useEffect(() => {
     // Issue once per draft (a ref, so React StrictMode's double effect cannot issue twice).
@@ -160,6 +201,7 @@ export function Confirmation({
   // ── Outcomes ─────────────────────────────────────────────────────
   const committed = useCallback(
     (result: CommittedResult, recovered: boolean) => {
+      if (!mounted.current) return
       setPhase({ kind: 'committed', result, recovered })
       onCommitted()
       announce(`Paid. Total debit ${formatMoney(result.receipt.total_debit)}. Simulated bank.`)
@@ -171,6 +213,7 @@ export function Confirmation({
 
   const applyResult = useCallback(
     (r: ApproveResult) => {
+      if (!mounted.current) return
       if (r.status === 'COMMITTED') committed(r, false)
       else if (r.status === 'AWAITING_STEP_UP') setPhase({ kind: 'step-up', reasonCodes: r.reason_codes ?? [] })
       else if (r.status === 'BLOCKED') {
@@ -194,6 +237,7 @@ export function Confirmation({
         setPhase({ kind: 'unknown' })
         return
       }
+      if (!mounted.current) return
       const status = typeof e.body?.status === 'string' ? e.body.status : ''
       if (status === 'AWAITING_STEP_UP') setPhase({ kind: 'step-up', reasonCodes: e.reasonCodes })
       else if (status === 'BLOCKED') setPhase({ kind: 'blocked', codes: e.reasonCodes, beforeApproval: false })
@@ -202,7 +246,7 @@ export function Confirmation({
       else if (status === 'CANCELLED') setPhase({ kind: 'cancelled' })
       else if (status === 'PENDING_APPROVAL') {
         setPhase({ kind: 'review' })
-        setInlineError('Your approval did not reach the bank, so nothing was paid. You can approve again.')
+        setInlineError('The bank currently shows this approval as pending. Any retry uses this same approval; check its result again if you are unsure.')
       } else setPhase({ kind: 'unknown' })
     }
   }, [authz, announce, committed])
@@ -216,7 +260,7 @@ export function Confirmation({
     inFlight.current = true
     setInlineError(null)
     setPhase({ kind: 'signing' })
-    announce('Waiting for Touch ID or your passkey.')
+    announce('Waiting for your passkey (Touch ID, Windows Hello or security key).')
     try {
       let assertion
       try {
@@ -227,6 +271,7 @@ export function Confirmation({
         setInlineError(e instanceof PasskeyError ? e.message : 'The passkey could not sign. Nothing was approved.')
         return
       }
+      if (!mounted.current) return
       setPhase({ kind: 'submitting' })
       try {
         applyResult(await api.approve(authz.authorization_id, authz.envelope_hash, assertion))
@@ -241,7 +286,7 @@ export function Confirmation({
         else if (base === 'POLICY_BLOCK') setPhase({ kind: 'blocked', codes: e.reasonCodes.length ? e.reasonCodes : [base], beforeApproval: false })
         else if (base === 'NOT_PENDING' || base === 'IDEMPOTENCY_CONFLICT') await recover()
         else if (base === 'ALREADY_APPROVED' || base === 'COMMIT_FAILED' || base === 'COMMIT_NOT_IMPLEMENTED')
-          setPhase({ kind: 'reissue', code: base })
+          await recover()
         else if (base === 'ENVELOPE_HASH_MISMATCH') {
           setAuthz(await api.authorization(authz.authorization_id))
           setPhase({ kind: 'review' })
@@ -311,6 +356,7 @@ export function Confirmation({
   }
 
   const busy = BUSY.has(phase.kind)
+  const canLeave = !(existingAuthorizationId && ['issue-failed', 'issuing', 'recovering', 'unknown'].includes(phase.kind))
   const validation = draft.validation
   const title = headingFor(phase, legs.length || draft.legs.length)
 
@@ -397,18 +443,18 @@ export function Confirmation({
               variant="approve"
               onClick={approve}
               busy={phase.kind !== 'review'}
-              busyLabel={phase.kind === 'signing' ? 'Waiting for Touch ID…' : 'Sending approval…'}
+              busyLabel={phase.kind === 'signing' ? 'Waiting for your passkey…' : 'Sending approval…'}
               disabled={busy || remaining === 0}
             >
-              Approve with Touch ID / passkey
+              Approve with passkey (Touch ID / Windows Hello)
             </Button>
           )}
-          {(phase.kind === 'expired' || phase.kind === 'reissue' || phase.kind === 'issue-failed') && (
-            <Button onClick={() => void issue()}>Get fresh details</Button>
+          {(phase.kind === 'expired' || phase.kind === 'reissue' || (phase.kind === 'issue-failed' && !isConfigurationError(phase.code))) && (
+            <Button onClick={() => void issue()}>{existingAuthorizationId ? 'Check existing approval' : 'Get fresh details'}</Button>
           )}
           {phase.kind === 'stale' && <Button onClick={onRedraft}>Prepare a new draft</Button>}
           {phase.kind === 'unknown' && <Button onClick={() => void recover()}>Check again</Button>}
-          {!['cancelled', 'unknown', 'recovering'].includes(phase.kind) && (
+          {canLeave && !['cancelled', 'unknown', 'recovering'].includes(phase.kind) && (
             <Button variant="secondary" onClick={onEdit} disabled={busy}>
               Edit request
             </Button>
@@ -418,7 +464,7 @@ export function Confirmation({
               Close
             </Button>
           ) : (
-            phase.kind !== 'unknown' && (
+            canLeave && phase.kind !== 'unknown' && (
               <Button variant="danger" onClick={() => void cancel()} disabled={busy}>
                 Cancel
               </Button>

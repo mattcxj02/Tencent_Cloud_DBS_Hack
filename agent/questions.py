@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from dataclasses import field as dc_field
+from typing import Any
 
 _MAX_WORDS_LEN = 40
 
@@ -20,6 +22,8 @@ class Issue:
     code: str
     question: str
     leg: int | None = None
+    field: str | None = None
+    candidates: list[dict[str, Any]] = dc_field(default_factory=list)
 
 
 def quote_words(text: str) -> str:
@@ -103,6 +107,18 @@ def recipient_not_found(words: str, options: Sequence[str] | None = None) -> str
     if options:
         return f"{base} Which one do you mean: {join_options(options)}?"
     return f"{base} Who should I pay? I can only pay saved payees or your own accounts."
+
+
+#: Last option of a "Did you mean …?" question, so the customer can reject every suggestion.
+NONE_OF_THESE = "none of these"
+
+
+def recipient_did_you_mean(words: str, options: Sequence[str]) -> str:
+    """Near spellings of the user's words. The UI turns the options into answer chips."""
+    return (
+        f"I couldn't find {quote_words(words)} exactly. "
+        f"Did you mean: {join_options([*options, NONE_OF_THESE])}?"
+    )
 
 
 def recipient_ambiguous(words: str, options: Sequence[str]) -> str:

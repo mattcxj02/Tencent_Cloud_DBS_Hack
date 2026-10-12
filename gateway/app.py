@@ -14,6 +14,7 @@ from typing import Any
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from gateway.asr_routes import router as asr_router
 from gateway.bank_routes import router as bank_router
@@ -23,7 +24,9 @@ from gateway.identity_routes import router as identity_router
 from gateway.mandate_routes import router as mandate_router
 from gateway.operator_routes import router as operator_router
 from gateway.orchestration_routes import router as orchestration_router
+from gateway.payee_routes import router as payee_router
 from gateway.read_routes import router as read_router
+from gateway.readiness import configuration_status, drafting_problem, log_configuration
 from gateway.stepup_routes import router as stepup_router
 from gateway.telemetry import get_gateway_telemetry
 from gateway.telemetry import health as telemetry_health
@@ -33,6 +36,7 @@ from shared.settings import load_gateway_settings
 
 @asynccontextmanager
 async def _lifespan(_: FastAPI) -> AsyncIterator[None]:
+    log_configuration()
     yield
     # Flush the last telemetry batch; never let shutdown fail on telemetry.
     with suppress(Exception):
@@ -62,6 +66,7 @@ app.include_router(mandate_router)
 app.include_router(operator_router)
 app.include_router(orchestration_router)
 app.include_router(read_router)
+app.include_router(payee_router)
 
 
 @app.get("/health")
@@ -79,4 +84,22 @@ async def health() -> dict[str, Any]:
         "trtc": "configured" if settings.trtc_enabled else "missing-credentials",
         "langfuse": "configured" if settings.langfuse_enabled else "missing-credentials",
         "telemetry": telemetry_health(),
+        **configuration_status(),
     }
+
+
+@app.get("/ready")
+@app.get("/api/ready")
+def ready() -> JSONResponse:
+    """Drafting readiness, separate from liveness and simulated step-up availability."""
+    problem = drafting_problem()
+    body = {
+        "service": "gateway",
+        "drafting": "ready" if problem is None else "unavailable",
+        **configuration_status(),
+    }
+    if problem is not None:
+        body["code"] = problem
+    return JSONResponse(
+        body, status_code=200 if problem is None else 503, headers={"Cache-Control": "no-store"}
+    )

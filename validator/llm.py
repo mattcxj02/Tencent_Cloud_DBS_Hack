@@ -30,6 +30,10 @@ class LLMTimeoutError(Exception):
     """The provider call exceeded its timeout."""
 
 
+class LLMConfigurationError(Exception):
+    """Provider authentication, model access or request configuration is invalid."""
+
+
 class LLMClient(Protocol):
     def complete(self, messages: list[dict[str, str]], *, timeout_seconds: float) -> LLMReply:
         """Return the model's reply or raise. Any exception is treated as an ERROR."""
@@ -83,6 +87,14 @@ class OpenAICompatibleLLM:
                 temperature=0,
                 timeout=timeout_seconds,
             )
+        except (
+            openai.AuthenticationError,
+            openai.PermissionDeniedError,
+            openai.BadRequestError,
+            openai.NotFoundError,
+            openai.UnprocessableEntityError,
+        ):
+            raise LLMConfigurationError("provider configuration rejected") from None
         except openai.APITimeoutError:
             raise LLMTimeoutError("provider call timed out") from None
 

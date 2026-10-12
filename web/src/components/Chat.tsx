@@ -3,9 +3,12 @@
 // confirmation. Late responses never replace a newer revision.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api, ApiError } from '../api'
-import { uploadVoice } from '../audio/api'
-import type { Conversation, DraftBundle, Turn, ValidationView } from '../api'
-import { describeCode } from '../messages'
+import { readProgress, savedOperation, saveOperation, stopDraft, watchProgress, type Operation, type Progress } from '../progress'
+import { ProgressNotice } from './ProgressNotice'
+import { ExistingPayment } from './ExistingPayment'
+import { uploadVoice, type VoiceResponse } from '../audio/api'
+import type { ClarificationQuestion, Conversation, DraftBundle, DraftResult, StructuredAnswer, Turn, ValidationView } from '../api'
+import { describeCode, isConfigurationError } from '../messages'
 import { diffLegs, fromDraftLeg } from '../legs'
 import type { LegChange, LegView } from '../legs'
 import { hrefFor } from '../router'
@@ -22,9 +25,11 @@ const CONV_KEY = 'dcta.conversation_id'
 
 type Flow =
   | { kind: 'none' }
-  | { kind: 'clarify'; question: { turn_id: string; text: string } }
+  | { kind: 'clarify'; question: ClarificationQuestion }
   | { kind: 'bundle'; draft: DraftBundle; prevLegs: LegView[] | null; changes: LegChange[] }
-  | { kind: 'error'; code: string }
+  | { kind: 'error'; code: string; validationOnly?: boolean }
+  | { kind: 'recover'; authorizationId: string }
+  | { kind: 'recovery-error'; code: string }
 
 type Busy = null | 'sending' | 'drafting' | 'voice'
 
@@ -62,11 +67,16 @@ export function ChatPage() {
   const [conversationId, setConversationId] = useState<string | null>(readConv)
   const [conversation, setConversation] = useState<Conversation | null>(null)
   const [flow, setFlow] = useState<Flow>({ kind: 'none' })
+  const [resumeAttempt, setResumeAttempt] = useState(0)
+  const [progress, setProgress] = useState<Progress | null>(null)
+  const operation = useRef<Operation | null>(null)
+  const controller = useRef<AbortController | null>(null)
   const [busy, setBusy] = useState<Busy>(null)
   const [error, setError] = useState<string | null>(null)
   const [editingTurnId, setEditingTurnId] = useState<string | null>(null)
   // After a receipt the conversation is closed: the next message starts a new one, so a
   // paid request can never be drafted (and paid) again from the same words.
+  const [approvalPending, setApprovalPending] = useState(false)
   const [completed, setCompleted] = useState(false)
   const completedRef = useRef(false)
 
@@ -78,26 +88,66 @@ export function ChatPage() {
 
   const turns = useMemo(() => visibleTurns(conversation?.turns ?? []), [conversation])
 
-  const refresh = useCallback(async (id: string) => {
+  const refresh = useCallback(async (id: string, ticket = epoch.current) => {
     const c = await api.conversation(id)
-    latestRevision.current = Math.max(latestRevision.current, c.revision)
+    if (ticket !== epoch.current || convRef.current !== id) return
+    latestRevision.current = c.revision
     setConversation(c)
   }, [])
 
-  // Resume the conversation of this browser tab after a reload.
+  // Recover payment state before restoring drafting work after a reload.
   useEffect(() => {
+    const ticket = epoch.current
     const id = convRef.current
-    if (!id) return
-    refresh(id).catch((e) => {
-      if (e instanceof ApiError && (e.status === 404 || e.status === 403)) {
-        convRef.current = null
-        setConversationId(null)
-        writeConv(null)
+    const recovery = new AbortController()
+    controller.current = recovery
+    let evidenceRead = false
+    const resume = async () => {
+      if (!id) return
+      busyRef.current = true
+      setBusy('sending')
+      await refresh(id, ticket)
+      const evidence = await api.evidence(id)
+      evidenceRead = true
+      if (ticket !== epoch.current) return
+      const existing = [...evidence.authorizations].reverse().find((a) =>
+        ['COMMITTED', 'PENDING_APPROVAL', 'AWAITING_STEP_UP'].includes(a.status))
+      if (existing) {
+        setFlow({ kind: 'recover', authorizationId: existing.authorization_id })
+        return
       }
+      const op = savedOperation()
+      if (op?.conversationId === id) {
+        operation.current = op
+        setBusy(op.kind === 'voice' ? 'voice' : 'drafting')
+        await readProgress(op, recovery.signal)
+        const p = await watchProgress(op, recovery.signal, (p) => {
+          if (ticket === epoch.current) setProgress(p)
+        })
+        if (ticket !== epoch.current) return
+        if (p?.code) setFlow({ kind: 'error', code: p.code, validationOnly: p.retry_validation })
+        else if (p?.result && op.kind === 'draft') await applyDraft(id, ticket, p.result as DraftResult)
+        else if (p?.result && op.kind === 'voice') {
+          await refresh(id, ticket)
+          await draftNow(id, ticket)
+        } else setFlow({ kind: 'error', code: 'PROGRESS_NOT_FOUND' })
+      }
+    }
+    void resume().catch(async (e) => {
+      if (ticket !== epoch.current) return
+      if (e instanceof ApiError && ['CONVERSATION_CHANGED', 'STALE_CONVERSATION_REVISION'].includes(e.code)) {
+        await refresh(id!, ticket)
+        await draftNow(id!, ticket, false, false)
+      } else if (e instanceof ApiError && e.status === 404 && e.code !== 'PROGRESS_NOT_FOUND') {
+        convRef.current = null; setConversationId(null); writeConv(null)
+      } else setFlow({ kind: evidenceRead ? 'error' : 'recovery-error', code: errorCode(e) })
+    }).finally(() => {
+      if (ticket === epoch.current) { busyRef.current = false; setBusy(null) }
     })
-  }, [refresh])
+    return () => { epoch.current++; recovery.abort(); controller.current?.abort() }
+  }, [refresh, resumeAttempt])
 
-  const ensureConversation = async (): Promise<string> => {
+  const ensureConversation = async (ticket: number): Promise<string> => {
     if (completedRef.current) {
       completedRef.current = false
       setCompleted(false)
@@ -107,6 +157,7 @@ export function ChatPage() {
     }
     if (convRef.current) return convRef.current
     const c = await api.createConversation()
+    if (ticket !== epoch.current) throw new ApiError(0, 'REQUEST_CANCELLED', [], null)
     convRef.current = c.conversation_id
     setConversationId(c.conversation_id)
     writeConv(c.conversation_id)
@@ -121,43 +172,89 @@ export function ChatPage() {
     }
   }
 
-  /** Ask the gateway for a draft of the current revision. */
-  const draftNow = async (id: string, ticket: number) => {
-    setBusy('drafting')
-    announce('Preparing your draft and checking it independently…')
-    let result
-    try {
-      result = await api.draft(id)
-    } catch (e) {
-      if (ticket !== epoch.current) return
-      setFlow({ kind: 'error', code: errorCode(e) })
-      return
-    }
-    if (ticket !== epoch.current) return // a newer action happened meanwhile
-    if (result.status !== 'error' && result.conversation_revision < latestRevision.current) return // stale
-    await refresh(id).catch(() => undefined) // shows the gateway-recorded question turn
-    if (ticket !== epoch.current) return
+  const applyDraft = async (id: string, ticket: number, result: DraftResult) => {
+    if (ticket !== epoch.current || convRef.current !== id) return false
+    await refresh(id, ticket).catch(() => undefined)
+    if (ticket !== epoch.current || convRef.current !== id) return false
+    if (result.status !== 'error' && result.conversation_revision !== latestRevision.current) return false
     if (result.status === 'clarify') {
       setFlow({ kind: 'clarify', question: result.question })
       announce(`Question: ${result.question.text}`)
     } else if (result.status === 'error') {
       setFlow({ kind: 'error', code: result.code })
-    } else if (result.status === 'ready' || result.status === 'needs_correction') {
+    } else {
       const legs = result.legs.map((l) => fromDraftLeg(l, accounts ?? []))
       const prev = lastLegs.current
       lastLegs.current = legs
       setFlow({ kind: 'bundle', draft: result, prevLegs: prev, changes: prev ? diffLegs(prev, legs) : [] })
-    } else {
-      setFlow({ kind: 'error', code: 'UNEXPECTED_DRAFT_STATUS' }) // never approve on an unknown shape
     }
+    return true
+  }
+
+  /** Stale input gets one automatic rebuild; validation retries must reuse frozen work. */
+  const draftNow = async (id: string, ticket: number, validationOnly = false, rebuild = true): Promise<void> => {
+    if (ticket !== epoch.current) return
+    setBusy('drafting')
+    const op: Operation = { conversationId: id, revision: latestRevision.current,
+      operationId: crypto.randomUUID(), kind: 'draft' }
+    const control = new AbortController()
+    controller.current = control
+    operation.current = op
+    saveOperation(op)
+    setProgress(null)
+    let last: Progress | null = null
+    const polling = watchProgress(op, control.signal, (p) => {
+      last = p
+      if (ticket === epoch.current && convRef.current === id) setProgress(p)
+    }).catch(() => null)
+    try {
+      const result = await api.draft(id, { operation_id: op.operationId, revision: op.revision,
+        mode: validationOnly ? 'validation' : 'auto', signal: control.signal })
+      if (result.status === 'error') throw new ApiError(503, result.code, [], null)
+      if (!await applyDraft(id, ticket, result) && ticket === epoch.current) {
+        throw new ApiError(409, 'CONVERSATION_CHANGED', [], {})
+      }
+    } catch (e) {
+      if (ticket !== epoch.current || control.signal.aborted) return
+      const code = errorCode(e)
+      if (rebuild && ['CONVERSATION_CHANGED', 'STALE_CONVERSATION_REVISION'].includes(code)) {
+        control.abort()
+        await refresh(id, ticket)
+        await draftNow(id, ticket, false, false)
+        return
+      }
+      if (e instanceof ApiError && e.network) {
+        const recovered = await polling
+        if (ticket !== epoch.current) return
+        if (recovered?.result) { await applyDraft(id, ticket, recovered.result as DraftResult); return }
+      }
+      last = await readProgress(op, control.signal).catch(() => last)
+      if (ticket === epoch.current) setFlow({ kind: 'error', code: last?.code ?? code,
+        validationOnly: validationOnly || last?.retry_validation })
+    } finally {
+      control.abort()
+      if (operation.current === op) operation.current = null
+    }
+  }
+
+  const stopProcessing = () => {
+    const op = operation.current
+    controller.current?.abort()
+    if (op?.kind === 'draft') void stopDraft(op).catch(() => undefined)
+    operation.current = null
+    saveOperation(null)
   }
 
   /** Run one user action: no double submits, and only the newest action may update the screen. */
   const run = async (kind: Busy, action: (ticket: number) => Promise<void>) => {
-    if (busyRef.current) return
+    if (busyRef.current) {
+      if (kind !== 'sending' || operation.current?.kind !== 'draft') return
+      stopProcessing()
+    }
     busyRef.current = true
     const ticket = ++epoch.current
     setBusy(kind)
+    if (kind === 'sending' || kind === 'voice') setFlow({ kind: 'none' })
     setError(null)
     try {
       await action(ticket)
@@ -171,34 +268,52 @@ export function ChatPage() {
     }
   }
 
-  const sendText = (text: string) =>
+  const sendText = (text: string | StructuredAnswer) =>
     run('sending', async (ticket) => {
-      const id = await ensureConversation()
+      const id = await ensureConversation(ticket)
       const question = flow.kind === 'clarify' ? flow.question : null
-      const turn = question ? await api.answer(id, question.turn_id, text) : await api.appendText(id, text)
+      if (!question && typeof text !== 'string') return
+      const turn = question ? await api.answer(id, question.turn_id, text) : await api.appendText(id, text as string)
+      if (ticket !== epoch.current || convRef.current !== id) return
       noteTurn(turn)
       setFlow({ kind: 'none' })
       setEditingTurnId(null)
-      await refresh(id)
+      await refresh(id, ticket)
       if (ticket === epoch.current) await draftNow(id, ticket)
     })
 
   const saveEdit = (turnId: string, text: string) =>
     run('sending', async (ticket) => {
-      const id = await ensureConversation()
-      noteTurn(await api.editTranscript(id, turnId, text))
+      const id = await ensureConversation(ticket)
+      const turn = await api.editTranscript(id, turnId, text)
+      if (ticket !== epoch.current || convRef.current !== id) return
+      noteTurn(turn)
       setEditingTurnId(null)
       setFlow({ kind: 'none' }) // the old draft and any pending approval are superseded
       announce('Correction saved. Preparing a new draft.')
-      await refresh(id)
+      await refresh(id, ticket)
       if (ticket === epoch.current) await draftNow(id, ticket)
     })
 
   const sendVoice = (audio: Blob) =>
     run('voice', async (ticket) => {
-      const id = await ensureConversation()
-      announce('Transcribing your voice…')
-      const res = await uploadVoice(id, audio) // sends consent=true; gateway stores the exact WAV
+      const id = await ensureConversation(ticket)
+      const op: Operation = { conversationId: id, revision: latestRevision.current,
+        operationId: crypto.randomUUID(), kind: 'voice' }
+      const control = new AbortController()
+      controller.current = control; operation.current = op; saveOperation(op); setProgress(null)
+      const polling = watchProgress(op, control.signal, (p) => {
+        if (ticket === epoch.current) setProgress(p)
+      }).catch(() => null)
+      let res
+      try { res = await uploadVoice(id, audio, op.operationId, control.signal) }
+      catch (e) {
+        if (!(e instanceof ApiError) || !e.network) throw e
+        const recovered = await polling
+        if (!recovered?.result || recovered.kind !== 'voice') throw e
+        res = recovered.result as VoiceResponse
+      } finally { control.abort(); if (operation.current === op) operation.current = null }
+      if (ticket !== epoch.current) return
       if (!res.turn) {
         await refresh(id)
         setError('ASR_NO_SPEECH')
@@ -206,17 +321,18 @@ export function ChatPage() {
       }
       noteTurn(res.turn)
       setFlow({ kind: 'none' })
-      await refresh(id)
+      await refresh(id, ticket)
+      if (ticket !== epoch.current) return
       announce(`Heard: ${res.turn.text}. You can correct it if it is wrong.`)
       if (ticket === epoch.current) await draftNow(id, ticket)
     })
 
-  const redraft = () =>
+  const redraft = (validationOnly = false) =>
     run('drafting', async (ticket) => {
       const id = convRef.current
       if (!id) return
       setFlow({ kind: 'none' })
-      await draftNow(id, ticket)
+      await draftNow(id, ticket, validationOnly)
     })
 
   const editLatest = () => {
@@ -225,6 +341,8 @@ export function ChatPage() {
   }
 
   const dismiss = () => {
+    if (operation.current) announce('Stopped waiting for this draft. Approved payments are unchanged.')
+    stopProcessing()
     epoch.current++ // drop any late draft result
     busyRef.current = false
     setBusy(null)
@@ -238,6 +356,7 @@ export function ChatPage() {
   }, [])
 
   const newConversation = () => {
+    stopProcessing()
     epoch.current++
     completedRef.current = false
     setCompleted(false)
@@ -280,7 +399,7 @@ export function ChatPage() {
             'No conversation yet'
           )}
         </span>
-        <Button variant="secondary" onClick={newConversation} disabled={busy === 'sending'}>
+        <Button variant="secondary" onClick={newConversation} disabled={approvalPending || busy === 'sending' || (flow.kind === 'recover' || flow.kind === 'recovery-error')}>
           New conversation
         </Button>
       </div>
@@ -288,18 +407,27 @@ export function ChatPage() {
       <Transcript
         turns={turns}
         editingTurnId={editingTurnId}
-        busy={busy !== null || completed}
+        busy={approvalPending || (busy !== null && busy !== 'drafting') || completed || (flow.kind === 'recover' || flow.kind === 'recovery-error')}
         onStartEdit={setEditingTurnId}
         onCancelEdit={() => setEditingTurnId(null)}
         onSaveEdit={saveEdit}
       />
 
-      {busy === 'drafting' && (
-        <Notice kind="info" title="Preparing your draft and checking it independently…">
-          <p className="text-sm">This can take a few seconds.</p>
-        </Notice>
-      )}
-      {busy === 'voice' && <Notice kind="info" title="Transcribing your voice…" />}
+      {(busy === 'drafting' || busy === 'voice') && <>
+        <ProgressNotice progress={progress} />
+        {busy === 'drafting' && <Button variant="secondary" onClick={dismiss}>Stop preparing draft</Button>}
+        {busy === 'drafting' && <p className="text-sm">You can correct the transcript above. Saving a correction replaces this draft; it does not cancel a payment already approved.</p>}
+      </>}
+
+      {flow.kind === 'recovery-error' && <Notice kind="error" title="Payment state is not confirmed yet">
+        <p>Your saved conversation may have an approval or receipt. Check it before starting another payment.</p>
+        <Button onClick={() => setResumeAttempt((a) => a + 1)}>Check existing payment</Button>
+      </Notice>}
+
+      {flow.kind === 'recover' && <ExistingPayment authorizationId={flow.authorizationId}
+        onCommitted={markCommitted} onFinished={newConversation}
+        onEdit={() => { setFlow({ kind: 'none' }); editLatest() }}
+        onRedraft={() => redraft()} onClose={dismiss} />}
 
       {error && (
         <Notice kind="error" title={describeCode(error)} focus>
@@ -318,9 +446,10 @@ export function ChatPage() {
             draft={flow.draft}
             prevLegs={flow.prevLegs}
             onEdit={editLatest}
-            onRedraft={redraft}
+            onRedraft={() => redraft()}
             onClose={dismiss}
             onCommitted={markCommitted}
+            onPendingChange={setApprovalPending}
             onFinished={newConversation}
           />
         ) : (
@@ -330,19 +459,20 @@ export function ChatPage() {
             changes={flow.changes}
             turns={conversation?.turns ?? []}
             onEdit={editLatest}
-            onRedraft={redraft}
+            onRedraft={() => redraft()}
             onDismiss={dismiss}
             onNewConversation={newConversation}
             onValidated={onValidated}
+            onRetryValidation={() => redraft(true)}
           />
         ))}
 
       {flow.kind === 'error' && (
         <Notice kind="error" title="We couldn't prepare a draft" focus>
           <p>{describeCode(flow.code)}</p>
-          <p className="text-sm">Nothing was paid. Your messages are saved.</p>
+          <p className="text-sm">Draft preparation cannot move money. Your messages are saved.</p>
           <div className="flex flex-wrap gap-2">
-            <Button onClick={redraft}>Try again</Button>
+            {!isConfigurationError(flow.code) && <Button onClick={() => redraft(flow.validationOnly)}>{flow.validationOnly ? 'Retry validation of saved draft' : 'Prepare draft again'}</Button>}
             {(flow.code === 'CONTEXT_LIMIT_RESTATE' || flow.code === 'CONVERSATION_NOT_FOUND') && (
               <Button variant="secondary" onClick={newConversation}>
                 Start a new conversation
@@ -360,7 +490,7 @@ export function ChatPage() {
 
       {flow.kind === 'none' && !completed && busy === null && turns.some((t) => t.current.role !== 'app_question') && (
         <div>
-          <Button variant="secondary" onClick={redraft}>
+          <Button variant="secondary" onClick={() => redraft()}>
             Prepare a draft from this conversation
           </Button>
         </div>
@@ -369,7 +499,7 @@ export function ChatPage() {
       <Composer
         label={pendingQuestion ? 'Your answer' : 'Your request'}
         placeholder={pendingQuestion ? 'Type your answer…' : 'e.g. Send Mum 50 dollars from savings'}
-        disabled={busy !== null}
+        disabled={approvalPending || busy !== null || (flow.kind === 'recover' || flow.kind === 'recovery-error')}
         onSend={sendText}
         onRecorded={sendVoice}
       />

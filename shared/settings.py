@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _ENV_CONFIG = SettingsConfigDict(
@@ -42,11 +42,27 @@ class LangfuseSettings(_BaseSettings):
 
 
 LLMProvider = Literal["tokenhub", "deepseek"]
+ExtractReasoningEffort = Literal["no_think", "low", "high"]
 
 LLM_PROVIDER_URLS: dict[str, str] = {
     "tokenhub": "https://tokenhub-intl.tencentcloudmaas.com/v1",
     "deepseek": "https://api.deepseek.com",
 }
+
+
+def extractor_reasoning_body(
+    provider: str | None, model: str, effort: ExtractReasoningEffort | None
+) -> dict:
+    """Only request controls verified by the 12 October 2026 TokenHub probes."""
+    if effort is None:
+        return {}
+    if effort not in ("no_think", "low", "high"):
+        raise ValueError("extractor reasoning setting must be no_think, low or high")
+    if provider == "tokenhub" and model == "hy3":
+        return {"reasoning_effort": effort}
+    if provider == "tokenhub" and model == "mimo-v2.6-flash" and effort == "no_think":
+        return {"thinking": {"type": "disabled"}}
+    raise ValueError("extractor reasoning setting is unsupported for this provider/model")
 
 
 class LLMSettings(_BaseSettings):
@@ -70,7 +86,7 @@ class LLMSettings(_BaseSettings):
 
     @property
     def llm_enabled(self) -> bool:
-        return bool(self.llm_api_key)
+        return bool(self.llm_api_key and self.llm_api_key.strip())
 
 
 class TRTCSettings(_BaseSettings):
@@ -112,8 +128,29 @@ class AgentSettings(LLMSettings, LangfuseSettings):
     # hy3 is a reasoning model: reasoning tokens count against max_tokens, and at 200 the
     # answer came back empty. Keep this generous.
     # hy3 reasons before answering; a 2-leg request already used ~1,500 tokens.
-    extract_max_tokens: int = Field(default=4096, alias="EXTRACT_MAX_TOKENS")
+    extract_max_tokens: int = Field(default=4096, gt=0, alias="EXTRACT_MAX_TOKENS")
+    # Keep timeout * (1 + retries), plus SDK backoff and gateway reads, below the
+    # gateway's AGENT_TIMEOUT_SECONDS (default 45). No SDK retries by default.
+    extract_timeout_seconds: float = Field(
+        default=40.0, gt=0, le=120, alias="EXTRACT_TIMEOUT_SECONDS"
+    )
+    extract_max_retries: int = Field(default=0, ge=0, le=2, alias="EXTRACT_MAX_RETRIES")
+    extract_reasoning_effort: ExtractReasoningEffort | None = Field(
+        default=None, alias="EXTRACT_REASONING_EFFORT"
+    )
     gateway_base_url: str = Field(default="http://localhost:8002", alias="GATEWAY_BASE_URL")
+
+    @field_validator("extract_reasoning_effort", mode="before")
+    @classmethod
+    def _empty_reasoning_is_unset(cls, value: object) -> object:
+        return None if value == "" else value
+
+    @model_validator(mode="after")
+    def _supported_reasoning(self) -> AgentSettings:
+        extractor_reasoning_body(
+            self.llm_provider, self.extract_model, self.extract_reasoning_effort
+        )
+        return self
 
 
 class ValidatorSettings(LLMSettings, LangfuseSettings, ValidatorServiceTokenSettings):
@@ -148,7 +185,10 @@ class GatewaySettings(LangfuseSettings, TRTCSettings, ValidatorServiceTokenSetti
     agent_base_url: str = Field(default="http://localhost:8001", alias="AGENT_BASE_URL")
     # hy3 reasons before answering: 4–12 s per extraction measured, longer on long
     # conversations. 15 s timed out a live follow-up turn.
+    # Must cover EXTRACT_TIMEOUT_SECONDS * (1 + EXTRACT_MAX_RETRIES), SDK backoff
+    # and gateway reads (extractor defaults: 40 s, no retries).
     agent_timeout_seconds: float = Field(default=45.0, gt=0, le=120, alias="AGENT_TIMEOUT_SECONDS")
+    draft_timeout_seconds: float = Field(default=90.0, gt=0, le=180, alias="DRAFT_TIMEOUT_SECONDS")
     # Must exceed the validator's own model timeout (VALIDATE_TIMEOUT_SECONDS, default 30).
     validator_client_timeout_seconds: float = Field(
         default=40.0, gt=0, le=180, alias="VALIDATOR_CLIENT_TIMEOUT_SECONDS"

@@ -46,6 +46,7 @@ from shared.clients.validator import (
     ValidationResult,
     request_problem,
 )
+from shared.deadline import DEADLINE_HEADER, Deadline
 from shared.settings import ValidatorSettings, load_validator_settings
 from shared.telemetry import Telemetry, TraceParent, extract_trace_context
 from validator.llm import LLMClient, build_llm
@@ -157,6 +158,12 @@ def _trace_input(request: ValidationRequest) -> dict[str, Any]:
         leg["source_account"] = labels.get(leg.pop("source_account_id"), "unlisted account")
         if leg["target_id"] in labels:
             leg["target_id"] = labels[leg["target_id"]]
+    for evidence in view["calculation_evidence"]:
+        expression = evidence["expression"]
+        if "account_id" in expression:
+            expression["account_id"] = labels.get(expression["account_id"], "unlisted account")
+        for debit in evidence["preceding_debits"] + evidence["dependencies"]:
+            debit["source_account_id"] = labels.get(debit["source_account_id"], "unlisted account")
     view["bank_metadata"]["accounts"] = [a.display for a in request.bank_metadata.accounts]
     for target in view["bank_metadata"]["targets"]:
         if target["target_id"] in labels:
@@ -186,13 +193,13 @@ def _outcome(result: ValidationResult) -> tuple[str, str | None]:
 
 
 def _run_model(
-    runtime: _Runtime, telemetry: Telemetry, request: ValidationRequest
+    runtime: _Runtime, telemetry: Telemetry, request: ValidationRequest, deadline: Deadline
 ) -> ValidationResult:
     """One validation, recorded as a ``validator-llm-call`` generation when a model
     is configured (no generation is recorded for a call that cannot happen)."""
     service = runtime.service()
     if not runtime.llm_ready():
-        return service.run(request)
+        return service.run(request, deadline=deadline)
     settings = runtime.settings()
     with telemetry.generation(
         "validator-llm-call",
@@ -208,7 +215,7 @@ def _run_model(
         },
         attributes={"request_id": request.request_id, "leg_count": len(request.bundle.legs)},
     ) as generation:
-        result = service.run(request)
+        result = service.run(request, deadline=deadline)
         status, reason = _outcome(result)
         generation.update(
             output=_trace_output(result),
@@ -221,7 +228,9 @@ def _run_model(
     return result
 
 
-def _validate_traced(runtime: _Runtime, body: bytes, parent: TraceParent | None) -> tuple[int, Any]:
+def _validate_traced(
+    runtime: _Runtime, body: bytes, parent: TraceParent | None, deadline: Deadline
+) -> tuple[int, Any]:
     """Parse, check and run one validation inside a ``semantic_validation`` span.
 
     Runs on one worker thread so the span and generation share a trace context.
@@ -255,7 +264,7 @@ def _validate_traced(runtime: _Runtime, body: bytes, parent: TraceParent | None)
         if problem is not None:
             span.set_status("rejected", reason_code=problem)
             return (413 if problem == "CONTEXT_LIMIT_RESTATE" else 422), problem
-        result = _run_model(runtime, telemetry, parsed)
+        result = _run_model(runtime, telemetry, parsed, deadline)
         span.set_attributes({"validator_verdict": result.verdict or "ERROR"})
         status, reason = _outcome(result)
         span.set_status(status, reason_code=reason)
@@ -307,10 +316,25 @@ def create_app(
         if body is None:
             return _refusal(413, "CONTEXT_LIMIT_RESTATE")
         parent = extract_trace_context(request.headers)  # correlation only, never auth
-        status_code, payload = await run_in_threadpool(_validate_traced, runtime, body, parent)
+        deadline = Deadline.from_header(
+            request.headers.get(DEADLINE_HEADER), runtime.settings().validate_timeout_seconds
+        )
+        status_code, payload = await run_in_threadpool(
+            _validate_traced, runtime, body, parent, deadline
+        )
         if status_code != 200:
             return _refusal(status_code, payload)
         return JSONResponse(payload, headers=_NO_STORE)
+
+    @application.get("/internal/ready")
+    async def ready(request: Request) -> JSONResponse:
+        """Authenticate the gateway and check configuration without a model call."""
+        refusal = _token_refusal(runtime.settings(), request.headers.get("authorization"))
+        if refusal is not None:
+            return refusal
+        if not runtime.llm_ready() or not runtime.settings().validate_model.strip():
+            return _refusal(503, "LLM_NOT_CONFIGURED")
+        return JSONResponse({"status": "ready"}, headers=_NO_STORE)
 
     return application
 

@@ -17,7 +17,7 @@ export class PasskeyError extends Error {
 
 export const PASSKEY_MESSAGES: Record<PasskeyFailure, string> = {
   denied:
-    'Touch ID / passkey was cancelled, timed out, or this device has no passkey for your account. Nothing was approved. You can try again.',
+    'The passkey prompt (Touch ID / Windows Hello) was cancelled, timed out, or this device has no passkey for your account. Nothing was approved. You can try again.',
   unsupported: 'This browser cannot use passkeys. Please use a recent Chrome, Safari or Edge.',
   security:
     'The browser refused the passkey request for this page address. Open the app at its configured address (for example http://localhost:5173).',

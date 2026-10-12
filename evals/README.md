@@ -107,3 +107,5 @@ stored as drafts; they exist only as validation requests.
 - `dev_overlap` cases share a scenario (not text) with prompt examples or earlier tests.
   Nothing in this set was used to tune prompts or code. The `--fake` oracle run checks that
   fixtures are reachable through deterministic code; it is not a measurement.
+
+Phase 6 wrong-draft probes retain the original draft's frozen calculation evidence rather than recomputing it for a deliberately mutated amount. Inconsistent arithmetic/dependencies fail as `ERROR INVALID_REQUEST` before the model; report these separately from semantic `MISMATCH`/`UNCERTAIN`. A fake run checks plumbing and cannot establish live prompt accuracy.

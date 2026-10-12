@@ -24,6 +24,7 @@ import uuid
 from typing import Any
 
 from shared.canonical import canonical_bytes
+from shared.clarification import QuestionField, Selection
 from shared.timeutil import now_utc, to_iso
 
 __all__ = [
@@ -375,9 +376,36 @@ class ConversationStore:
         user_id: str,
         conversation_id: str,
         answers_question_id: str,
-        text: str,
+        text: str | None,
+        *,
+        question_revision: int | None = None,
+        selections: list[Selection] | None = None,
     ) -> dict[str, Any]:
         """Append a ``user_answer`` turn tied to an ``app_question``."""
+        if selections:
+            if text is not None:
+                raise ValueError("CHOICE_WITH_FREE_TEXT")
+            from gateway.telemetry import stage
+
+            with stage(
+                "ingest",
+                user_id=user_id,
+                conversation_id=conversation_id,
+                attributes={"conversation_id": conversation_id, "channel": "user_answer"},
+            ) as span:
+                result = self._append_selection(
+                    user_id, conversation_id, answers_question_id, question_revision, selections
+                )
+                span.set_attributes(
+                    {
+                        "turn_id": result["turn_id"],
+                        "turn_index": result["seq"],
+                        "conversation_revision": result["conversation_revision"],
+                    }
+                )
+                return result
+        if text is None or not text.strip():
+            raise ValueError("ANSWER_EMPTY")
         return self._user_append(
             user_id,
             conversation_id,
@@ -385,6 +413,55 @@ class ConversationStore:
             text,
             answers_question_id=answers_question_id,
         )
+
+    def _append_selection(
+        self,
+        user_id: str,
+        conversation_id: str,
+        question_id: str,
+        question_revision: int | None,
+        selections: list[Selection],
+    ) -> dict[str, Any]:
+        from gateway import clarifications as C
+        from gateway.audit import append_audit
+
+        conn = self._conn()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            conv = self._get_conversation_row(conn, conversation_id)
+            if conv is None or conv["owner_user_id"] != user_id:
+                raise PermissionError("conversation not owned by user")
+            q = C.check_question(conn, conversation_id, question_id, int(conv["revision"]))
+            if q is None:
+                raise ValueError("CHOICE_QUESTION_INVALID")
+            text, chosen = C.selected_answer(conn, user_id, q, question_revision, selections)
+            self._check_bounds(conn, conversation_id, text)
+            result = self._append_turn(
+                conn, conversation_id, "user_answer", text, answers_question_id=question_id
+            )
+            for s in chosen:
+                s["span"]["turn_id"] = result["turn_id"]
+            append_audit(
+                conn,
+                source="gateway",
+                conversation_id=conversation_id,
+                user_id=user_id,
+                step="gateway.clarification.answer",
+                payload={
+                    "question_id": question_id,
+                    "question_revision": q["revision"],
+                    "revision": result["conversation_revision"],
+                    "turn_id": result["turn_id"],
+                    "selections": chosen,
+                },
+            )
+            conn.commit()
+            return result
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
 
     def _user_append(
         self,
@@ -469,6 +546,11 @@ class ConversationStore:
 
             # If answering a question, verify the question exists.
             if answers_question_id is not None:
+                from gateway.clarifications import check_question
+
+                check_question(
+                    conn, conversation_id, answers_question_id, int(conv_row["revision"])
+                )
                 q = conn.execute(
                     "SELECT turn_id, role FROM conversation_turns "
                     "WHERE turn_id = ? AND conversation_id = ?",
@@ -500,7 +582,16 @@ class ConversationStore:
 
     # ── Agent-originated (app_question, no revision bump) ───────────
 
-    def append_question(self, conversation_id: str, text: str) -> dict[str, Any]:
+    def append_question(
+        self,
+        conversation_id: str,
+        text: str,
+        *,
+        revision: int | None = None,
+        fields: list[QuestionField] | None = None,
+        extraction: dict | None = None,
+        run_id: str | None = None,
+    ) -> dict[str, Any]:
         """Append an ``app_question`` turn (does NOT bump user revision).
 
         Called by the internal route after the delegation token has been
@@ -510,9 +601,21 @@ class ConversationStore:
         conn = self._conn()
         try:
             conn.execute("BEGIN IMMEDIATE")
+            from gateway.drafting_work import check_run
+
+            check_run(run_id, conn)
             conv_row = self._get_conversation_row(conn, conversation_id)
             if conv_row is None:
                 raise ValueError(f"conversation not found: {conversation_id}")
+
+            from gateway import clarifications as C
+
+            current_revision = int(conv_row["revision"])
+            if revision is not None and revision != current_revision:
+                raise ValueError("STALE_CONVERSATION_REVISION")
+            if fields and revision is None:
+                raise ValueError("QUESTION_REVISION_REQUIRED")
+            prepared = C.prepare_fields(conn, conv_row["owner_user_id"], fields or [])
 
             self._check_bounds(conn, conversation_id, text)
             result = self._append_turn(
@@ -522,6 +625,15 @@ class ConversationStore:
                 text,
                 bump_revision=False,
             )
+            q = {
+                "turn_id": result["turn_id"],
+                "revision": current_revision,
+                "fields": prepared,
+                "extraction": extraction,
+            }
+            C.save_question(conn, conversation_id, conv_row["owner_user_id"], q)
+            result["clarification"] = C.public_question(q)
+            check_run(run_id, conn)
             conn.commit()
             return result
         except Exception:
@@ -680,11 +792,16 @@ class ConversationStore:
             if conv_row is None:
                 return None
             turns = self._get_turns(conn, conversation_id)
+            from gateway.clarifications import structured_update
+
             return {
                 "conversation_id": conv_row["conversation_id"],
                 "revision": int(conv_row["revision"]),
                 "conversation_hash": conv_row["conversation_hash"],
                 "turns": turns,
+                "structured_update": structured_update(
+                    conn, conversation_id, int(conv_row["revision"])
+                ),
             }
         finally:
             conn.close()

@@ -32,6 +32,7 @@ from fastapi import (
     Depends,
     File,
     HTTPException,
+    Request,
     UploadFile,
     status,
 )
@@ -65,7 +66,9 @@ from gateway.conversations import (
     ContextLimitError,
     ConversationStore,
 )
+from gateway.identity_routes import _check_origin
 from shared.canonical import canonical_bytes
+from shared.deadline import DeadlineExpired
 
 router = APIRouter(tags=["conversation"])
 
@@ -175,16 +178,25 @@ async def append_answer(
     conversation_id: str,
     body: AnswerRequest,
     user: UserSession,
+    request: Request,
 ) -> dict:
+    if body.selections:
+        _check_origin(request)
     store = get_conversation_store()
     try:
         result = store.append_answer(
-            user.user_id, conversation_id, body.answers_question_id, body.text
+            user.user_id,
+            conversation_id,
+            body.answers_question_id,
+            body.text,
+            question_revision=body.question_revision,
+            selections=body.selections,
         )
     except PermissionError:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="not found") from None
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from None
+        code = status.HTTP_400_BAD_REQUEST if body.selections else status.HTTP_404_NOT_FOUND
+        raise HTTPException(status_code=code, detail=str(exc)) from None
     except ContextLimitError:
         raise HTTPException(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
@@ -396,7 +408,16 @@ async def propose_question(
         conn.close()
 
     try:
-        return store.append_question(conversation_id, body.text)
+        return store.append_question(
+            conversation_id,
+            body.text,
+            revision=body.revision,
+            fields=body.fields,
+            extraction=body.extraction,
+            run_id=principal.run_id,
+        )
+    except DeadlineExpired:
+        raise HTTPException(status_code=409, detail="DRAFT_WORK_INACTIVE") from None
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from None
     except ContextLimitError:

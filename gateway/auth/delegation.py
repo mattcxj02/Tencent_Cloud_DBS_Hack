@@ -61,6 +61,7 @@ class Principal:
     scopes: frozenset[str]
     conversation_id: str | None = None
     token_id: str = field(default="")
+    run_id: str | None = None
 
     def has_scope(self, scope: str) -> bool:
         return scope in self.scopes
@@ -107,6 +108,7 @@ class DelegationIssuer:
         *,
         conversation_id: str | None = None,
         ttl_seconds: int | None = None,
+        run_id: str | None = None,
     ) -> str:
         """Issue a delegation token for *user_id* with *scopes*.
 
@@ -128,6 +130,8 @@ class DelegationIssuer:
         if conversation_id is not None:
             payload["conversation_id"] = conversation_id
 
+        if run_id is not None:
+            payload["run_id"] = run_id
         return self._encode(payload)
 
     def verify_token(self, token: str) -> Principal:
@@ -156,6 +160,7 @@ class DelegationIssuer:
             scopes=scopes,
             conversation_id=conversation_id,
             token_id=token_id,
+            run_id=payload.get("run_id"),
         )
 
     # ── internal encoding/decoding ──────────────────────────────────
@@ -271,6 +276,14 @@ def require_principal(scope: str):
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"missing required scope: {scope}",
             )
+        if scope != "audit:append_agent":
+            from gateway.drafting_work import check_run
+            from shared.deadline import DeadlineExpired
+
+            try:
+                check_run(principal.run_id)
+            except DeadlineExpired:
+                raise HTTPException(status_code=409, detail="DRAFT_WORK_INACTIVE") from None
         return principal
 
     return _dependency

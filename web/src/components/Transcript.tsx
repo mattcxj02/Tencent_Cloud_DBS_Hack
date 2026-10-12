@@ -88,7 +88,7 @@ function TurnEditor({
         aria-describedby="turn-editor-hint"
       />
       <p id="turn-editor-hint" className="text-sm text-slate-700">
-        The original stays in the record. Saving prepares a new draft. Esc cancels.
+        Check names and amounts. The original stays in the record. Saving replaces any draft in progress and prepares the corrected draft. Esc cancels the edit.
       </p>
       <div className="flex flex-wrap gap-2">
         <Button onClick={save} busy={busy} busyLabel="Saving…">
@@ -174,7 +174,7 @@ export function Transcript({
                     className="mt-1 min-h-[44px] px-1 text-sm font-semibold text-indigo-800 underline underline-offset-2 disabled:opacity-60"
                     aria-label={`Correct this: ${v.current.text.slice(0, 60)}`}
                   >
-                    Correct this
+                    {v.origin.role === 'user_asr_final' ? 'Correct this transcript' : 'Correct this'}
                   </button>
                 ))}
             </div>

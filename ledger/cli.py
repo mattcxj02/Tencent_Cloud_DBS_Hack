@@ -4,6 +4,7 @@ Usage::
 
     make seed                         # uses default DCTA_DB_PATH (data/dcta.db)
     DCTA_DB_PATH=/tmp/test.db make seed   # seed a temp DB
+    make upgrade-db                   # add new tables and aliases, keep passkeys and history
 """
 
 from __future__ import annotations
@@ -12,7 +13,7 @@ import sys
 from pathlib import Path
 
 from ledger.schema import connect, init_db
-from ledger.seed import seed_db
+from ledger.seed import seed_db, upgrade_db
 from shared.settings import load_gateway_settings
 
 
@@ -23,6 +24,13 @@ def main() -> int:
     path.parent.mkdir(parents=True, exist_ok=True)
 
     conn = connect(db_path)
+    if "--upgrade" in sys.argv[1:]:
+        try:
+            added = upgrade_db(conn)
+        finally:
+            conn.close()
+        print(f"Upgraded {db_path}: schema current, {added} new payee aliases")
+        return 0
     try:
         init_db(conn)
         seed_db(conn)
@@ -35,6 +43,7 @@ def main() -> int:
             "account_holders",
             "payees",
             "payee_aliases",
+            "payee_nicknames",
             "billers",
             "saved_billers",
             "cards",

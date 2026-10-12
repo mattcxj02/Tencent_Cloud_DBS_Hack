@@ -14,9 +14,11 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from gateway.payees import PayeeNames, payee_names
 from ledger.schema import cents_to_money, connect, init_db, money_to_cents
 from ledger.seed import seed_db
 from shared.money import Money
+from shared.names import fuzzy_mentions, mentions
 from shared.timeutil import to_iso
 
 __all__ = [
@@ -127,12 +129,17 @@ class BankStore:
     # ── Payees ────────────────────────────────────────────────────────
 
     def search_payees(self, user_id: str, query: str) -> list[dict[str, Any]]:
-        """Return ALL matching payee candidates for a name/alias.
+        """Return ALL matching payee candidates for a name, alias or nickname.
 
-        - Case-insensitive exact alias match.
-        - Case-insensitive token/substring match on display name.
-        - Never auto-select; never rank-and-pick.
-        - Returns all candidates so the user/agent can disambiguate.
+        - ``match: "exact"``: the query is part of the display name (case-insensitive),
+          or contains the payee's full name, an alias or a nickname under the shared rule
+          (:func:`shared.names.mentions`: case, punctuation and spacing between words
+          are ignored).
+        - ``match: "fuzzy"``: otherwise, a near spelling of one of those names
+          (:func:`shared.names.fuzzy_mentions`). A suggestion only: the agent must ask
+          the customer, and the evidence check never accepts it.
+        - Never auto-select; never rank-and-pick. Exact candidates come first.
+        - ``names`` lists the payee's aliases and nicknames so the caller can match them.
         """
         query = query.strip()
         if not query or len(query) > MAX_QUERY_LENGTH:
@@ -140,50 +147,39 @@ class BankStore:
 
         conn = self._conn()
         try:
-            # Alias matches (case-insensitive exact).
-            alias_rows = conn.execute(
+            names = payee_names(conn, user_id)
+            rows = conn.execute(
                 """
-                SELECT p.payee_id, p.owner_user_id, p.display_name, p.bank,
-                       p.masked_suffix, p.kind, p.sanctioned, p.created_at
-                FROM payees p
-                JOIN payee_aliases pa ON pa.payee_id = p.payee_id
-                WHERE p.owner_user_id = ? AND LOWER(pa.alias) = LOWER(?)
+                SELECT payee_id, display_name, bank, masked_suffix, kind, sanctioned
+                FROM payees WHERE owner_user_id = ? ORDER BY payee_id
                 """,
-                (user_id, query),
+                (user_id,),
             ).fetchall()
-
-            seen_ids = {row["payee_id"] for row in alias_rows}
-
-            # Substring/token match on display name (case-insensitive).
-            # Escape LIKE wildcards so "%" or "_" in the query match literally.
-            escaped = query.lower().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-            pattern = f"%{escaped}%"
-            name_rows = conn.execute(
-                """
-                SELECT p.payee_id, p.owner_user_id, p.display_name, p.bank,
-                       p.masked_suffix, p.kind, p.sanctioned, p.created_at
-                FROM payees p
-                WHERE p.owner_user_id = ? AND LOWER(p.display_name) LIKE ? ESCAPE '\\'
-                """,
-                (user_id, pattern),
-            ).fetchall()
-
-            # Merge, preserving order: aliases first, then name matches not already seen.
-            all_rows = list(alias_rows) + [
-                row for row in name_rows if row["payee_id"] not in seen_ids
-            ]
-
-            return [
-                {
-                    "payee_id": row["payee_id"],
-                    "display_name": row["display_name"],
-                    "bank": row["bank"],
-                    "masked_suffix": row["masked_suffix"],
-                    "kind": row["kind"],
-                    "sanctioned": bool(row["sanctioned"]),
-                }
-                for row in all_rows
-            ]
+            exact: list[dict[str, Any]] = []
+            fuzzy: list[dict[str, Any]] = []
+            needle = query.casefold()
+            for row in rows:
+                extra = names.get(row["payee_id"], PayeeNames()).all
+                full = (row["display_name"], *extra)
+                if needle in row["display_name"].casefold() or mentions(query, full):
+                    match, bucket = "exact", exact
+                elif fuzzy_mentions(query, (*full, *row["display_name"].split())):
+                    match, bucket = "fuzzy", fuzzy
+                else:
+                    continue
+                bucket.append(
+                    {
+                        "payee_id": row["payee_id"],
+                        "display_name": row["display_name"],
+                        "bank": row["bank"],
+                        "masked_suffix": row["masked_suffix"],
+                        "kind": row["kind"],
+                        "sanctioned": bool(row["sanctioned"]),
+                        "names": list(extra),
+                        "match": match,
+                    }
+                )
+            return exact + fuzzy
         finally:
             conn.close()
 

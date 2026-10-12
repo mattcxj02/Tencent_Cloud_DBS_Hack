@@ -34,6 +34,7 @@ from decimal import Decimal
 from typing import Any
 
 from gateway.audit import REVISION_BOUND_TABLES
+from gateway.calculations import freeze_calculations
 from gateway.clock import utcnow
 from gateway.evidence import EvidenceError, TurnIndex, build_leg_lineage
 from shared.canonical import (
@@ -52,6 +53,7 @@ from shared.schemas import (
     EquityTerms,
     FrozenBundle,
     Leg,
+    RemainingBalance,
     SigningEnvelope,
     resolve_amount_exprs,
 )
@@ -163,6 +165,15 @@ def _checked_reference(
 # ── DraftStore ────────────────────────────────────────────────────────
 
 
+def _mandate_version(conn: sqlite3.Connection, user_id: str) -> int | None:
+    row = conn.execute(
+        "SELECT version FROM mandates WHERE user_id = ? AND status IN ('active', 'paused') "
+        "ORDER BY version DESC LIMIT 1",
+        (user_id,),
+    ).fetchone()
+    return int(row["version"]) if row is not None else None
+
+
 class DraftStore:
     """Read/write access to frozen drafts, authorizations, and approvals.
 
@@ -191,6 +202,7 @@ class DraftStore:
         conversation_id: str,
         conversation_revision: int,
         legs: list[dict[str, Any]],
+        run_id: str | None = None,
     ) -> FrozenBundle:
         """Freeze an untrusted agent proposal into an immutable bundle.
 
@@ -216,6 +228,9 @@ class DraftStore:
         conn = self._conn()
         try:
             conn.execute("BEGIN IMMEDIATE")
+            from gateway.drafting_work import check_run
+
+            check_run(run_id, conn)
 
             # ── Validate conversation ownership ──
             conv_row = conn.execute(
@@ -269,11 +284,7 @@ class DraftStore:
                     raise DraftError("AMOUNT_EXPR_INVALID") from None
                 draft_exprs.append((leg_id, source_acct, expr))
 
-            # Resolve all amounts (forward/self references, negative remainders...).
-            try:
-                resolved_amounts = resolve_amount_exprs(draft_exprs, balances)
-            except (TypeError, ValueError):
-                raise DraftError("AMOUNT_EXPR_INVALID") from None
+            resolved_amounts: list[Money] = []
 
             # ── Build each Leg ──
             amount_parents: dict[str, list] = {}
@@ -286,7 +297,31 @@ class DraftStore:
                     target_id = raw_leg["target_id"]
                 except (KeyError, ValueError):
                     raise DraftError("LEG_INVALID") from None
-                amount = resolved_amounts[i]
+                # Recompute with the frozen preceding results. Remaining cash uses
+                # actual debits (equity share rounding can leave part of a budget).
+                current_expr = draft_exprs[i][2]
+                if isinstance(current_expr, RemainingBalance):
+                    if current_expr.account_id != source_acct:
+                        raise DraftError("AMOUNT_EXPR_INVALID")
+                    spent = sum(
+                        (leg.amount.value for leg in resolved_legs
+                         if leg.source_account_id == current_expr.account_id),
+                        Decimal("0"),
+                    )
+                    try:
+                        amount = Money(balances[current_expr.account_id] - spent)
+                    except ValueError:
+                        raise DraftError("AMOUNT_EXPR_INVALID") from None
+                else:
+                    prefix = [
+                        (leg.leg_id, leg.source_account_id, resolved_amounts[j])
+                        for j, leg in enumerate(resolved_legs)
+                    ]
+                    try:
+                        amount = resolve_amount_exprs([*prefix, draft_exprs[i]], balances)[-1]
+                    except (TypeError, ValueError):
+                        raise DraftError("AMOUNT_EXPR_INVALID") from None
+                resolved_amounts.append(amount)
 
                 # Validate target ownership.
                 _validate_target(conn, user_id, action, target_type, target_id, bank_store)
@@ -309,6 +344,9 @@ class DraftStore:
                         raise DraftError("RELATIVE_REFERENCE_INVALID")
                 elif expr.get("kind") == "remaining_balance":
                     parents = [build_bank_record_ref(expr["account_id"])]
+                    for preceding in resolved_legs:
+                        if preceding.source_account_id == expr["account_id"]:
+                            parents.extend(amount_parents[preceding.leg_id])
                 else:
                     parents = None
                 try:
@@ -381,6 +419,8 @@ class DraftStore:
                 ),
             )
 
+            freeze_calculations(conn, bundle, draft_exprs, resolved_amounts, balances)
+
             # Audit.
             from gateway.audit import append_audit
 
@@ -394,9 +434,11 @@ class DraftStore:
                     "bundle_id": str(bundle_id),
                     "bundle_hash": bh,
                     "legs": len(resolved_legs),
+                    "mandate_version": _mandate_version(conn, user_id),
                 },
             )
 
+            check_run(run_id, conn)
             conn.commit()
             return bundle
 

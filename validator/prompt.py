@@ -92,6 +92,7 @@ def model_view(request: ValidationRequest) -> dict[str, Any]:
     return {
         "conversation": {"turns": turns},
         "drafted_legs": [_leg_view(i, leg) for i, leg in enumerate(request.bundle.legs, 1)],
+        "calculation_evidence": [e.model_dump(mode="json") for e in request.calculation_evidence],
         "bank_metadata": {
             "accounts": [
                 {"account_id": a.account_id, "display": a.display}

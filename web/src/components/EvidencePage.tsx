@@ -127,7 +127,7 @@ function AuthorizationLine({ a }: { a: EvidenceAuthorization }) {
       </p>
       {a.approval ? (
         <p>
-          Approved with your passkey at {formatDateTime(a.approval.verified_at)} · user verification (Touch ID/PIN):{' '}
+          Approved with your passkey at {formatDateTime(a.approval.verified_at)} · user verification (Touch ID, Windows Hello or PIN):{' '}
           {a.approval.user_verified ? 'yes' : 'no'}
         </p>
       ) : (

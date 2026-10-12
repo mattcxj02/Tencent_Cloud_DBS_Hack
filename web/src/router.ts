@@ -1,14 +1,14 @@
-// Minimal hash routing: #/chat, #/mandate, #/evidence[/<conversation_id>], #/baseline, #/signin.
+// Minimal hash routing: #/chat, #/payees, #/mandate, #/evidence[/<conversation_id>], #/baseline, #/signin.
 import { useEffect, useState } from 'react'
 
-export type RouteName = 'chat' | 'mandate' | 'evidence' | 'baseline' | 'signin'
+export type RouteName = 'chat' | 'payees' | 'mandate' | 'evidence' | 'baseline' | 'signin'
 
 export interface Route {
   name: RouteName
   param: string | null
 }
 
-const NAMES: RouteName[] = ['chat', 'mandate', 'evidence', 'baseline', 'signin']
+const NAMES: RouteName[] = ['chat', 'payees', 'mandate', 'evidence', 'baseline', 'signin']
 
 export function parseHash(hash: string): Route {
   const parts = hash.replace(/^#\/?/, '').split('/').filter(Boolean)

@@ -28,16 +28,17 @@ A WebAuthn passkey resists phishing, and its private key stays on the device. Th
 Real: passkey verification (`py_webauthn`), Tencent TRTC speech recognition, the TokenHub and DeepSeek models, Langfuse Cloud, Docker isolation and atomic SQLite transactions. Simulated: the bank and ledger, payees and PayNow routing, billers and cards, SGX quotes, KYC and sanctions, the step-up "SMS" (an operator console) and every limit. There is no DBS, PayNow or SGX connection.
 
 **6. How fast is it?**
-- **Agent turn:** median 9.0 s, 95th percentile 17.9 s, maximum 29.0 s (n = 35). Almost all of that is the reasoning model ([T-14](evidence/T-14-results.md)).
-- **Validator:** median 1.3 s on real drafts.
+- **Extraction:** median 2.0 s, 95th percentile 3.2 s (n = 35) with the model's reasoning turned off, down from median 9.0 s / p95 17.9 s on 10 Oct. Accuracy stayed at 33–34 of 35 with zero unsafe drafts across three trials ([T-14-no-think](evidence/T-14-no-think.md)).
+- **Validator:** median 1.3–1.9 s on real drafts.
+- **Progress:** the screen shows the stage the backend has actually reached (extracting, validating…) with elapsed time, and drafting has one 90 s overall deadline.
 - **TRTC transcription:** 260–493 ms on 3 clips ([T-12](evidence/T-12-voice.md)).
 - **Live two-payment request:** ready in 8.2 s ([E2E](evidence/E2E-live.md)).
 
-This is slower than tapping one saved payee. The case for DCTA is several payments in one request, plus accessibility, and the usability comparison that would test it is still pending. Next steps: a faster non-reasoning extractor for simple requests, and streaming ASR.
+This is still slower than tapping one saved payee. The case for DCTA is several payments in one request, plus accessibility, and the usability comparison that would test it is still pending. Next step: streaming ASR.
 
 **7. What does it cost to run?**
 Not measured. No model prices were configured, so cost is recorded as "unavailable", not zero. Token counts were measured ([T-14](evidence/T-14-results.md)):
-- **Extractor:** 50,194 input and 41,489 output tokens over 35 requests, about 1,430 and 1,190 per request. The output includes `hy3`'s reasoning tokens.
+- **Extractor:** on 10 Oct, 50,194 input and 41,489 output tokens over 35 requests (about 1,430 and 1,190 per request, mostly reasoning). With reasoning off on 13 Oct: 52,959 input and 3,372 output tokens (about 1,510 and 96 per request), a 92% cut in output tokens.
 - **Validator:** 122,143 input and 32,190 output tokens over 56 checks, about 2,180 and 575 per check.
 
 Multiply by the vendors' current prices for an estimate.
@@ -55,13 +56,13 @@ It is measured only on 3 synthetic clips. Without hints, TRTC heard "Ah Ma" as "
 It runs the model's conversation loop inside TRTC's cloud, against a public model endpoint. That would bypass our fixed workflow, the gateway-owned conversation record and the independent validator. We use TRTC's standalone sentence ASR instead, so speech is input only and the TRTC credentials stay in the gateway. Streaming ASR and spoken replies (TTS) are possible additions.
 
 **12. The brief says the validator runs "in parallel". Yours runs after the draft. Why?**
-To check a draft, the draft must exist. The validator is an independent audit after compilation and before any approval. "Independent" here means a separate service, model, vendor, prompt and network, with no view of the extractor's reasoning. It adds a median of 1.3 s.
+To check a draft, the draft must exist. The validator is an independent audit after compilation and before any approval. "Independent" here means a separate service, model, vendor, prompt and network, with no view of the extractor's reasoning. It adds a median of about 1.3–1.9 s.
 
-**13. Isn't holding back 20% of correct drafts annoying?**
-The validator held back 5 of 25 correct drafts. Four contained injected or coercive text, such as a pasted "ignore previous instructions" or "a police officer told me", which is arguably the right moment to slow down. The fifth was "the rest" of a balance, which the validator cannot verify because it is not given balances. That gap in its input is fixable. Ordinary and clarification requests had no false holds (13/13). A hold means a question, not a failure.
+**13. Doesn't the validator hold back correct drafts?**
+On 10 Oct it held back 5 of 25 correct drafts. Four contained injected or coercive text ("ignore previous instructions", "a police officer told me"); the fifth was "the rest" of a balance it could not see. We fixed both causes: the gateway now gives it frozen calculation evidence (balance, earlier debits, result), and its prompt now separates "does this match the request" from "is this risky", which the gateway's deterministic scam, sanctions and limit rules already enforce. On 13 Oct it held back 0 of 24 correct drafts and still let 0 of 30 wrong drafts through ([T-14-no-think](evidence/T-14-no-think.md)). The coercion case still gets a step-up check from the gateway.
 
 **14. What stops a replayed or tampered approval?**
-The signed envelope carries a 32-byte nonce, an expiry of 120 s or less, the operation, the user, the credential and the mandate version. The gateway executes its own stored bytes, never a payload sent by the client. Approval is single-use under a database write lock. A repeated request returns the original receipt instead of paying again, and any correction voids pending approvals. These are covered by tests: [test_t05_approval.py](../tests/test_t05_approval.py) (tampered payload, wrong owner/origin/RP/challenge, double approval) and [test_t06_execution.py](../tests/test_t06_execution.py) (concurrency, idempotency). The T-13 attack matrix and Rogue Agent Mode run are in progress.
+The signed envelope carries a 32-byte nonce, an expiry of 120 s or less, the operation, the user, the credential and the mandate version. The gateway executes its own stored bytes, never a payload sent by the client. Approval is single-use under a database write lock. A repeated request returns the original receipt instead of paying again, and any correction voids pending approvals. These are covered by tests: [test_t05_approval.py](../tests/test_t05_approval.py) (tampered payload, wrong owner/origin/RP/challenge, double approval) and [test_t06_execution.py](../tests/test_t06_execution.py) (concurrency, idempotency). The Rogue Agent Mode run held 46/46 controls (rerun 13 Oct; [matrix](evidence/T-13-attack-matrix.md)).
 
 **15. How did you use CodeBuddy?**
 CodeBuddy's CLI (2.160.0, headless) built the scaffold, the signing schemas, the mock bank, the audit chain, container isolation and most of the passkey and draft work (T-00 to T-05). That took 8 logged runs, 958 tool calls, about 97 active minutes and 92 files, until its credits ran out on 10 Oct. Claude Code built the rest. A second, reviewing agent checked every task, and each CodeBuddy task needed at least one binding or authorization fix. Details: [evidence/codebuddy/](evidence/codebuddy/README.md). Development screenshots are still to be captured.

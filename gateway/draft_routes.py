@@ -44,6 +44,7 @@ from gateway.drafts import (
 from gateway.identity_routes import _check_origin
 from gateway.telemetry import stage
 from shared.canonical import bundle_hash
+from shared.deadline import DeadlineExpired
 from shared.telemetry import extract_trace_context
 
 router = APIRouter(tags=["drafts"])
@@ -134,7 +135,10 @@ def freeze_draft(
                 conversation_id=body.conversation_id,
                 conversation_revision=body.conversation_revision,
                 legs=[leg.model_dump() for leg in body.legs],
+                run_id=principal.run_id,
             )
+        except DeadlineExpired:
+            raise HTTPException(status_code=409, detail="DRAFT_WORK_INACTIVE") from None
         except DraftError as exc:
             code = str(exc)
             span.set_status(

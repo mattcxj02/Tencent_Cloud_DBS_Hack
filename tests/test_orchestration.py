@@ -68,10 +68,16 @@ def test_clarify_returns_the_gateway_stored_question(o: Orch) -> None:
     [question] = _app_questions(o, conv)
     assert body == {
         "status": "clarify",
-        "question": {"turn_id": question["turn_id"], "text": question["text"]},
+        "question": {
+            "turn_id": question["turn_id"],
+            "text": question["text"],
+            "clarification": body["question"]["clarification"],
+        },
         "conversation_revision": 1,
     }
     assert "John" in body["question"]["text"]
+    [field] = body["question"]["clarification"]["fields"]
+    assert field["field"] == "target" and field["leg_id"] == "leg-1"
     assert not _drafts(o, conv)
     assert o.v.llm.calls == []  # nothing to validate
 
@@ -226,7 +232,7 @@ def test_agent_extraction_error_is_reported_not_crashed(o: Orch) -> None:
     ("exc", "http_status", "code"),
     [
         (httpx.ConnectError("validator down"), 503, "VALIDATOR_UNAVAILABLE"),
-        (httpx.ReadTimeout("validator slow"), 504, "VALIDATOR_TIMEOUT"),
+        (httpx.ReadTimeout("validator slow"), 503, "VALIDATOR_UNAVAILABLE"),
     ],
 )
 def test_validator_unavailable_is_an_error_never_ready(
@@ -237,8 +243,8 @@ def test_validator_unavailable_is_an_error_never_ready(
     o.extractor(MUM)
     resp = o.draft(conv)
     assert (resp.status_code, resp.json()) == (http_status, {"status": "error", "code": code})
-    [draft] = _drafts(o, conv)
-    assert not o.v.passed(draft["bundle_id"])
+    assert _drafts(o, conv) == []
+    assert o.llm.calls == []
 
 
 def test_unexpected_failure_is_a_safe_502(o: Orch, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -313,10 +319,10 @@ def test_body_cannot_carry_fields(o: Orch) -> None:
     assert o.agent_requests == []
 
 
-# ── stale results re-run the agent once ─────────────────────────────
+# ── stale results end this request without downstream work ─────────────────────────────
 
 
-def test_stale_revision_from_agent_reruns_once(o: Orch) -> None:
+def test_stale_revision_from_agent_ends_without_retry(o: Orch) -> None:
     conv = o.conversation(MUM_TEXT)
     o.extractor(MUM)
     calls = {"n": 0}
@@ -330,8 +336,9 @@ def test_stale_revision_from_agent_reruns_once(o: Orch) -> None:
         return o.forward(request)
 
     o.handler = stale_then_real
-    assert o.drafted(conv)["status"] == "ready"
-    assert len(o.agent_requests) == 2
+    assert o.draft(conv).json()["code"] == "STALE_CONVERSATION_REVISION"
+    assert len(o.agent_requests) == 1
+    assert o.v.llm.calls == []
 
 
 def test_stale_twice_gives_up(o: Orch) -> None:
@@ -341,10 +348,10 @@ def test_stale_twice_gives_up(o: Orch) -> None:
     )
     resp = o.draft(conv)
     assert resp.json() == {"status": "error", "code": "STALE_CONVERSATION_REVISION"}
-    assert len(o.agent_requests) == 2
+    assert len(o.agent_requests) == 1
 
 
-def test_turn_added_after_freeze_redrafts_at_the_new_revision(o: Orch) -> None:
+def test_turn_added_after_freeze_stops_before_validation(o: Orch) -> None:
     conv = o.conversation(MUM_TEXT)
     o.extractor(MUM)
 
@@ -355,12 +362,10 @@ def test_turn_added_after_freeze_redrafts_at_the_new_revision(o: Orch) -> None:
         return response
 
     o.handler = freeze_then_user_speaks
-    body = o.drafted(conv)
-    assert body["status"] == "ready"
-    assert body["conversation_revision"] == 2
-    statuses = sorted(r["status"] for r in _drafts(o, conv))
-    assert statuses == ["DRAFT_FROZEN", "SUPERSEDED"]
-    assert len(o.agent_requests) == 2
+    assert o.draft(conv).json()["code"] == "CONVERSATION_CHANGED"
+    assert [r["status"] for r in _drafts(o, conv)] == ["SUPERSEDED"]
+    assert len(o.agent_requests) == 1
+    assert o.v.llm.calls == []
 
 
 class _TurnDuringValidation(ScriptedLLM):
@@ -376,16 +381,14 @@ class _TurnDuringValidation(ScriptedLLM):
         return super().complete(messages, timeout_seconds=timeout_seconds)
 
 
-def test_validation_superseded_mid_call_redrafts_once(o: Orch) -> None:
+def test_validation_superseded_mid_call_cannot_publish_confirmation(o: Orch) -> None:
     conv = o.conversation(MUM_TEXT)
     o.extractor(MUM)
     o.v.use_llm(_TurnDuringValidation(conv))
-    body = o.drafted(conv)
-    assert body["status"] == "ready"
-    assert body["conversation_revision"] == 2
-    assert len(o.agent_requests) == 2
+    assert o.draft(conv).json()["code"] == "CONVERSATION_CHANGED"
+    assert len(o.agent_requests) == 1
     states = [r["state"] for r in o.v.q("SELECT state FROM validation_results ORDER BY created_at")]
-    assert sorted(states) == ["CURRENT", "SUPERSEDED"]
+    assert states == ["SUPERSEDED"]
 
 
 def test_ready_draft_is_issued_and_new_turn_supersedes_it(o: Orch) -> None:

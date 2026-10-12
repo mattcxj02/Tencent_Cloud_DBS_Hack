@@ -17,3 +17,5 @@ Demo helper (not a smoke check; no `.env` access): `OPERATOR_TOKEN=... uv run py
 Latest results: `docs/evidence/T-00-smoke.md`.
 
 Local-only demo harness: `uv run python scripts/rogue_agent_demo.py [IDs] [--no-write]` (Rogue Agent Mode attack table; writes `docs/evidence/T-13-attack-matrix.md`). `scripts/operator_console.py` (or `make operator ARGS='code <id>'`) is the simulated phone for step-up codes.
+
+`dev.py` supervises the three local uvicorn services (`make dev`) in separate process groups. A checkout-local lock prevents duplicate supervisors; Ctrl-C, SIGTERM, terminal hangup, service exit and `make stop` clean up those groups, including reload workers. `stop` writes a marker only while the supervisor holds the lock and waits for cleanup; it never reads a stale PID or uses process-name killing. Runtime files are in ignored `.dev/`. This is a POSIX development helper, not container isolation.

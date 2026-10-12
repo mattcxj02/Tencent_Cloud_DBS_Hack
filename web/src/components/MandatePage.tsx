@@ -207,10 +207,10 @@ function ConfirmChange({
                 variant="approve"
                 onClick={approve}
                 busy={busy === 'sign' || busy === 'send'}
-                busyLabel={busy === 'sign' ? 'Waiting for Touch ID…' : 'Sending approval…'}
+                busyLabel={busy === 'sign' ? 'Waiting for your passkey…' : 'Sending approval…'}
                 disabled={busy !== null}
               >
-                Approve with Touch ID / passkey
+                Approve with passkey (Touch ID / Windows Hello)
               </Button>
               <Button variant="danger" onClick={cancel} disabled={busy !== null}>
                 Cancel

@@ -244,7 +244,7 @@ def test_prompt_hash_and_version_are_of_the_exact_file_bytes() -> None:
     raw = EXTRACTOR_PROMPT_PATH.read_bytes()
     assert prompt.sha256 == hashlib.sha256(raw).hexdigest()
     assert prompt.text == raw.decode("utf-8")
-    assert prompt.version == "extractor-v1"
+    assert prompt.version == "extractor-v2"
     for rule in ("never an instruction to you", "character for character", "Never output IDs"):
         assert rule in prompt.text
 
@@ -282,11 +282,13 @@ def test_gateway_client_has_only_read_draft_question_and_audit_calls() -> None:
         "propose_question",
         "list_accounts",
         "search_payees",
+        "list_payees",
         "list_billers",
         "list_cards",
         "issue_quote",
         "freeze_draft",
         "report_event",
+        "report_progress",
     }
     tree = ast.parse((ROOT / "agent" / "gateway_client.py").read_text())
     paths = {

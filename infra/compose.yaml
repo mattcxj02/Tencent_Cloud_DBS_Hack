@@ -30,6 +30,9 @@ services:
       - DCTA_DB_PATH=/data/dcta.db
       - VALIDATOR_BASE_URL=http://validator:8003
       - AGENT_BASE_URL=http://agent:8001
+      - AGENT_TIMEOUT_SECONDS=${AGENT_TIMEOUT_SECONDS:-45}
+      - DRAFT_TIMEOUT_SECONDS=${DRAFT_TIMEOUT_SECONDS:-90}
+      - VALIDATOR_CLIENT_TIMEOUT_SECONDS=${VALIDATOR_CLIENT_TIMEOUT_SECONDS:-40}
       - GATEWAY_DELEGATION_SECRET=${GATEWAY_DELEGATION_SECRET:-}
       - OPERATOR_TOKEN=${OPERATOR_TOKEN:-}
       - STEP_UP_SECRET=${STEP_UP_SECRET:-}
@@ -89,6 +92,9 @@ services:
       - EXTRACT_PROVIDER=${EXTRACT_PROVIDER:-tokenhub}
       - EXTRACT_MODEL=${EXTRACT_MODEL:-hy3}
       - EXTRACT_MAX_TOKENS=${EXTRACT_MAX_TOKENS:-4096}
+      - EXTRACT_TIMEOUT_SECONDS=${EXTRACT_TIMEOUT_SECONDS:-40}
+      - EXTRACT_MAX_RETRIES=${EXTRACT_MAX_RETRIES:-0}
+      - EXTRACT_REASONING_EFFORT=${EXTRACT_REASONING_EFFORT:-}
       # Least privilege: only the key for EXTRACT_PROVIDER (tokenhub). If you change
       # the provider, swap this line for deepseek_key.
       - tokenhub_key=${tokenhub_key:-}
@@ -128,6 +134,7 @@ services:
       - VALIDATE_PROVIDER=${VALIDATE_PROVIDER:-deepseek}
       - VALIDATE_MODEL=${VALIDATE_MODEL:-deepseek-flash}
       - VALIDATE_MAX_TOKENS=${VALIDATE_MAX_TOKENS:-4096}
+      - VALIDATE_TIMEOUT_SECONDS=${VALIDATE_TIMEOUT_SECONDS:-30}
       # Least privilege: only the key for VALIDATE_PROVIDER (deepseek). If you change
       # the provider, swap this line for tokenhub_key.
       - deepseek_key=${deepseek_key:-}

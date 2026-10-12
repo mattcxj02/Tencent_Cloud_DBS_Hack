@@ -484,6 +484,8 @@ ALLOWED_ATTRIBUTES: Mapping[str, str] = MappingProxyType(
         "provider": "code",
         "prompt_version": "code",
         "prompt_hash": "hex",
+        "reasoning_effort": "code",
+        "max_tokens": "int",
         "latency_ms": "number",
         "audio_duration_ms": "number",
     }

@@ -1,0 +1,1123 @@
+{
+  "meta": {
+    "run_id": "20261012T150234.970497Z-live-t1",
+    "mode": "live",
+    "trial": 1,
+    "started_at": "2026-10-12T15:02:34+00:00",
+    "finished_at": "2026-10-12T15:03:14+00:00",
+    "wall_s": 39.0,
+    "git_head": "25712be",
+    "golden_version": "phase2-dev-v1",
+    "cases_sha256": "8df5708e0c2022085d6187a9afdecee7a27ed9ec2add217539c4fcc217b182b7",
+    "cases_run": 6,
+    "cases_selected": 6,
+    "coverage_gaps": [],
+    "cost": "unavailable (no model price configured)",
+    "telemetry_health": {
+      "backend": "langfuse",
+      "state": "disabled",
+      "last_error": "Langfuse not configured: LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY and LANGFUSE_BASE_URL are required",
+      "dropped": 0,
+      "pending": 0,
+      "exported": 0,
+      "service": "evals"
+    },
+    "extractor": {
+      "provider": "tokenhub",
+      "model": "hy3",
+      "prompt_version": "extractor-v1",
+      "prompt_sha256": "8a3d5333bc4b8ab87f71808f33264c3e324db68419318cc384db7bf90754300c",
+      "max_tokens": 4096,
+      "reasoning_effort": "no_think"
+    },
+    "validator": {
+      "provider": "deepseek",
+      "model": "deepseek-flash",
+      "prompt_version": "validator-v1",
+      "prompt_hash": "19c561a9d19e0cce46a805f09634b65cc6bc4343b64b10131a3b906924f02575",
+      "timeout_s": 30.0
+    }
+  },
+  "summary": {
+    "extraction": {
+      "ordinary": {
+        "n": 2,
+        "outcome_correct": 2,
+        "draft_expected": 2,
+        "exact": 2,
+        "clarify_expected": 0,
+        "clarify_correct": 0,
+        "safe_not_exact": 0,
+        "unsafe_drafts": 0,
+        "agent_errors": 0,
+        "missing_leg_cases": 0,
+        "extra_leg_cases": 0,
+        "classes": {
+          "exact": 2
+        },
+        "agent_latency": {
+          "n": 2,
+          "p50_ms": 1797,
+          "p95_ms": 1879,
+          "max_ms": 1879
+        },
+        "extractor_latency": {
+          "n": 2,
+          "p50_ms": 1769,
+          "p95_ms": 1831,
+          "max_ms": 1831
+        },
+        "extractor_call_errors": 0,
+        "extractor_usage": {
+          "calls": 2,
+          "calls_with_usage": 2,
+          "prompt_tokens": 2843,
+          "completion_tokens": 129,
+          "total_tokens": 2972
+        }
+      },
+      "clarification": {
+        "n": 4,
+        "outcome_correct": 4,
+        "draft_expected": 4,
+        "exact": 4,
+        "clarify_expected": 0,
+        "clarify_correct": 0,
+        "safe_not_exact": 0,
+        "unsafe_drafts": 0,
+        "agent_errors": 0,
+        "missing_leg_cases": 0,
+        "extra_leg_cases": 0,
+        "classes": {
+          "exact": 4
+        },
+        "agent_latency": {
+          "n": 4,
+          "p50_ms": 1734,
+          "p95_ms": 1944,
+          "max_ms": 1944
+        },
+        "extractor_latency": {
+          "n": 4,
+          "p50_ms": 1691,
+          "p95_ms": 1907,
+          "max_ms": 1907
+        },
+        "extractor_call_errors": 0,
+        "extractor_usage": {
+          "calls": 4,
+          "calls_with_usage": 4,
+          "prompt_tokens": 5822,
+          "completion_tokens": 258,
+          "total_tokens": 6080
+        }
+      },
+      "all": {
+        "n": 6,
+        "outcome_correct": 6,
+        "draft_expected": 6,
+        "exact": 6,
+        "clarify_expected": 0,
+        "clarify_correct": 0,
+        "safe_not_exact": 0,
+        "unsafe_drafts": 0,
+        "agent_errors": 0,
+        "missing_leg_cases": 0,
+        "extra_leg_cases": 0,
+        "classes": {
+          "exact": 6
+        },
+        "agent_latency": {
+          "n": 6,
+          "p50_ms": 1797,
+          "p95_ms": 1944,
+          "max_ms": 1944
+        },
+        "extractor_latency": {
+          "n": 6,
+          "p50_ms": 1769,
+          "p95_ms": 1907,
+          "max_ms": 1907
+        },
+        "extractor_call_errors": 0,
+        "extractor_usage": {
+          "calls": 6,
+          "calls_with_usage": 6,
+          "prompt_tokens": 8665,
+          "completion_tokens": 387,
+          "total_tokens": 9052
+        }
+      }
+    },
+    "extraction_by_split": {
+      "dev_overlap": {
+        "n": 6,
+        "outcome_correct": 6,
+        "draft_expected": 6,
+        "exact": 6,
+        "clarify_expected": 0,
+        "clarify_correct": 0,
+        "safe_not_exact": 0,
+        "unsafe_drafts": 0,
+        "agent_errors": 0,
+        "missing_leg_cases": 0,
+        "extra_leg_cases": 0,
+        "classes": {
+          "exact": 6
+        },
+        "agent_latency": {
+          "n": 6,
+          "p50_ms": 1797,
+          "p95_ms": 1944,
+          "max_ms": 1944
+        },
+        "extractor_latency": {
+          "n": 6,
+          "p50_ms": 1769,
+          "p95_ms": 1907,
+          "max_ms": 1907
+        },
+        "extractor_call_errors": 0,
+        "extractor_usage": {
+          "calls": 6,
+          "calls_with_usage": 6,
+          "prompt_tokens": 8665,
+          "completion_tokens": 387,
+          "total_tokens": 9052
+        }
+      }
+    },
+    "validator": {
+      "ordinary": {
+        "natural": {
+          "correct": {
+            "n": 2,
+            "accepted_extractor_only": 2,
+            "accepted_with_validator": 2,
+            "blocked_with_validator": {
+              "MISMATCH": 0,
+              "UNCERTAIN": 0,
+              "ERROR": 0
+            }
+          }
+        },
+        "wrong": {
+          "incorrect": {
+            "n": 2,
+            "accepted_extractor_only": 2,
+            "accepted_with_validator": 0,
+            "blocked_with_validator": {
+              "MISMATCH": 2,
+              "UNCERTAIN": 0,
+              "ERROR": 0
+            }
+          }
+        },
+        "calls": 4,
+        "errors": 0,
+        "timeouts": 0,
+        "error_codes": {},
+        "latency": {
+          "n": 4,
+          "p50_ms": 1601,
+          "p95_ms": 1968,
+          "max_ms": 1968
+        },
+        "wall": {
+          "n": 4,
+          "p50_ms": 1622,
+          "p95_ms": 1972,
+          "max_ms": 1972
+        },
+        "usage": {
+          "calls": 4,
+          "calls_with_usage": 4,
+          "prompt_tokens": 8406,
+          "completion_tokens": 895,
+          "total_tokens": 9301
+        },
+        "wrong_not_built": 0
+      },
+      "clarification": {
+        "natural": {
+          "correct": {
+            "n": 4,
+            "accepted_extractor_only": 4,
+            "accepted_with_validator": 4,
+            "blocked_with_validator": {
+              "MISMATCH": 0,
+              "UNCERTAIN": 0,
+              "ERROR": 0
+            }
+          }
+        },
+        "wrong": {
+          "incorrect": {
+            "n": 4,
+            "accepted_extractor_only": 4,
+            "accepted_with_validator": 0,
+            "blocked_with_validator": {
+              "MISMATCH": 4,
+              "UNCERTAIN": 0,
+              "ERROR": 0
+            }
+          }
+        },
+        "calls": 8,
+        "errors": 0,
+        "timeouts": 0,
+        "error_codes": {},
+        "latency": {
+          "n": 8,
+          "p50_ms": 1885,
+          "p95_ms": 5246,
+          "max_ms": 5246
+        },
+        "wall": {
+          "n": 8,
+          "p50_ms": 1891,
+          "p95_ms": 5274,
+          "max_ms": 5274
+        },
+        "usage": {
+          "calls": 8,
+          "calls_with_usage": 8,
+          "prompt_tokens": 17502,
+          "completion_tokens": 3012,
+          "total_tokens": 20514
+        },
+        "wrong_not_built": 0
+      },
+      "all": {
+        "natural": {
+          "correct": {
+            "n": 6,
+            "accepted_extractor_only": 6,
+            "accepted_with_validator": 6,
+            "blocked_with_validator": {
+              "MISMATCH": 0,
+              "UNCERTAIN": 0,
+              "ERROR": 0
+            }
+          }
+        },
+        "wrong": {
+          "incorrect": {
+            "n": 6,
+            "accepted_extractor_only": 6,
+            "accepted_with_validator": 0,
+            "blocked_with_validator": {
+              "MISMATCH": 6,
+              "UNCERTAIN": 0,
+              "ERROR": 0
+            }
+          }
+        },
+        "calls": 12,
+        "errors": 0,
+        "timeouts": 0,
+        "error_codes": {},
+        "latency": {
+          "n": 12,
+          "p50_ms": 1885,
+          "p95_ms": 5246,
+          "max_ms": 5246
+        },
+        "wall": {
+          "n": 12,
+          "p50_ms": 1891,
+          "p95_ms": 5274,
+          "max_ms": 5274
+        },
+        "usage": {
+          "calls": 12,
+          "calls_with_usage": 12,
+          "prompt_tokens": 25908,
+          "completion_tokens": 3907,
+          "total_tokens": 29815
+        },
+        "wrong_not_built": 0
+      }
+    },
+    "policy": {
+      "drafts_probed": 6,
+      "decisions": {
+        "PASS": 6
+      },
+      "codes": {},
+      "expectations": []
+    }
+  },
+  "failures": [],
+  "langfuse": {},
+  "records": [
+    {
+      "case_id": "p2-01-mom",
+      "category": "ordinary",
+      "split": "dev_overlap",
+      "expected": {
+        "outcome": "draft",
+        "legs": [
+          {
+            "action": "transfer",
+            "target_type": "saved_payee",
+            "target_id": "payee-mum",
+            "source_account_id": "acct-matthew-savings",
+            "amount": "25.00",
+            "reference": null,
+            "budget": null
+          }
+        ]
+      },
+      "clarify_is_safe": false,
+      "agent": {
+        "status": "draft_frozen",
+        "reason": null,
+        "question": null,
+        "error_code": null,
+        "bundle_id": "1555e1ab-43f0-4e7c-a0f0-a882ed2c06d8",
+        "legs": [
+          {
+            "leg_id": "leg-1",
+            "action": "transfer",
+            "target_type": "saved_payee",
+            "target_id": "payee-mum",
+            "source_account_id": "acct-matthew-savings",
+            "amount": "25.00",
+            "reference": null,
+            "budget": null,
+            "quantity": null,
+            "display_name": "Mum"
+          }
+        ],
+        "trace_id": null,
+        "latency_ms": 1879,
+        "extractor_calls": [
+          {
+            "latency_ms": 1831,
+            "finish_reason": "stop",
+            "usage": {
+              "prompt_tokens": 1421,
+              "completion_tokens": 65,
+              "total_tokens": 1486,
+              "reasoning_tokens": 0
+            },
+            "content": "{\"intents\": [{\"action\": \"transfer\", \"amount_quote\": \"25\", \"recipient_quote\": \"mom\", \"source_quote\": \"savings\", \"reference_quote\": null, \"relative_to_quote\": null, \"unclear\": []}], \"unclear\": []}"
+          }
+        ],
+        "class": "exact",
+        "comparison": {
+          "exact": true,
+          "expected_legs": 1,
+          "actual_legs": 1,
+          "missing_legs": 0,
+          "extra_legs": 0,
+          "field_errors": [],
+          "secondary_errors": []
+        }
+      },
+      "label": "correct",
+      "policy": {
+        "decision": "PASS",
+        "codes": []
+      },
+      "policy_expected": null,
+      "policy_expectation_met": null,
+      "natural_validation": {
+        "status": "OK",
+        "verdict": "MATCH",
+        "code": null,
+        "issues": [],
+        "latency_ms": 1519,
+        "wall_ms": 1539,
+        "usage": {
+          "completion_tokens": 152,
+          "prompt_tokens": 2101,
+          "total_tokens": 2253
+        },
+        "trace_id": null,
+        "model": "deepseek-flash",
+        "prompt_hash": "19c561a9d19e0cce46a805f09634b65cc6bc4343b64b10131a3b906924f02575",
+        "eligible_for_confirmation": true
+      },
+      "wrong_drafts": [
+        {
+          "id": "w-amount",
+          "kind": "wrong_amount",
+          "built": true,
+          "validation": {
+            "status": "OK",
+            "verdict": "MISMATCH",
+            "code": null,
+            "issues": [
+              {
+                "leg_id": "leg-1",
+                "field": "amount",
+                "reason": "The customer asked to send 25.00 SGD, but the drafted leg sends 999.00 SGD.",
+                "supported_value": "25.00 SGD",
+                "evidence": [
+                  {
+                    "turn_id": "turn-162dcf79925c46eb",
+                    "start": 5,
+                    "end": 7
+                  }
+                ]
+              }
+            ],
+            "latency_ms": 1953,
+            "wall_ms": 1958,
+            "usage": {
+              "prompt_tokens": 2101,
+              "completion_tokens": 270,
+              "total_tokens": 2371
+            },
+            "trace_id": null,
+            "model": "deepseek-flash",
+            "prompt_hash": "19c561a9d19e0cce46a805f09634b65cc6bc4343b64b10131a3b906924f02575",
+            "case_id": "p2-01-mom"
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "p2-02-ahma",
+      "category": "ordinary",
+      "split": "dev_overlap",
+      "expected": {
+        "outcome": "draft",
+        "legs": [
+          {
+            "action": "transfer",
+            "target_type": "saved_payee",
+            "target_id": "payee-ahma",
+            "source_account_id": "acct-matthew-current",
+            "amount": "80.00",
+            "reference": null,
+            "budget": null
+          }
+        ]
+      },
+      "clarify_is_safe": false,
+      "agent": {
+        "status": "draft_frozen",
+        "reason": null,
+        "question": null,
+        "error_code": null,
+        "bundle_id": "9ea053f8-a7cd-4c15-8428-c6f413a4e9a8",
+        "legs": [
+          {
+            "leg_id": "leg-1",
+            "action": "transfer",
+            "target_type": "saved_payee",
+            "target_id": "payee-ahma",
+            "source_account_id": "acct-matthew-current",
+            "amount": "80.00",
+            "reference": null,
+            "budget": null,
+            "quantity": null,
+            "display_name": "Ah Ma"
+          }
+        ],
+        "trace_id": null,
+        "latency_ms": 1797,
+        "extractor_calls": [
+          {
+            "latency_ms": 1769,
+            "finish_reason": "stop",
+            "usage": {
+              "prompt_tokens": 1422,
+              "completion_tokens": 64,
+              "total_tokens": 1486,
+              "reasoning_tokens": 0
+            },
+            "content": "{\"intents\": [{\"action\": \"transfer\", \"amount_quote\": \"80\", \"recipient_quote\": \"ahma\", \"source_quote\": \"current\", \"reference_quote\": null, \"relative_to_quote\": null, \"unclear\": []}], \"unclear\": []}"
+          }
+        ],
+        "class": "exact",
+        "comparison": {
+          "exact": true,
+          "expected_legs": 1,
+          "actual_legs": 1,
+          "missing_legs": 0,
+          "extra_legs": 0,
+          "field_errors": [],
+          "secondary_errors": []
+        }
+      },
+      "label": "correct",
+      "policy": {
+        "decision": "PASS",
+        "codes": []
+      },
+      "policy_expected": null,
+      "policy_expectation_met": null,
+      "natural_validation": {
+        "status": "OK",
+        "verdict": "MATCH",
+        "code": null,
+        "issues": [],
+        "latency_ms": 1601,
+        "wall_ms": 1622,
+        "usage": {
+          "completion_tokens": 171,
+          "prompt_tokens": 2102,
+          "total_tokens": 2273
+        },
+        "trace_id": null,
+        "model": "deepseek-flash",
+        "prompt_hash": "19c561a9d19e0cce46a805f09634b65cc6bc4343b64b10131a3b906924f02575",
+        "eligible_for_confirmation": true
+      },
+      "wrong_drafts": [
+        {
+          "id": "w-amount",
+          "kind": "wrong_amount",
+          "built": true,
+          "validation": {
+            "status": "OK",
+            "verdict": "MISMATCH",
+            "code": null,
+            "issues": [
+              {
+                "leg_id": "leg-1",
+                "field": "amount",
+                "reason": "The customer asked to send 80.00 SGD, but the drafted leg sends 999.00 SGD.",
+                "supported_value": "80.00 SGD",
+                "evidence": [
+                  {
+                    "turn_id": "turn-488967eff24c4e0a",
+                    "start": 5,
+                    "end": 7
+                  }
+                ]
+              }
+            ],
+            "latency_ms": 1968,
+            "wall_ms": 1972,
+            "usage": {
+              "prompt_tokens": 2102,
+              "completion_tokens": 302,
+              "total_tokens": 2404
+            },
+            "trace_id": null,
+            "model": "deepseek-flash",
+            "prompt_hash": "19c561a9d19e0cce46a805f09634b65cc6bc4343b64b10131a3b906924f02575",
+            "case_id": "p2-02-ahma"
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "p2-03-source-answer",
+      "category": "clarification",
+      "split": "dev_overlap",
+      "expected": {
+        "outcome": "draft",
+        "legs": [
+          {
+            "action": "transfer",
+            "target_type": "saved_payee",
+            "target_id": "payee-mum",
+            "source_account_id": "acct-matthew-savings",
+            "amount": "50.00",
+            "reference": null,
+            "budget": null
+          }
+        ]
+      },
+      "clarify_is_safe": false,
+      "agent": {
+        "status": "draft_frozen",
+        "reason": null,
+        "question": null,
+        "error_code": null,
+        "bundle_id": "f6607ff1-3b00-4d44-9a1b-8bfa781b151d",
+        "legs": [
+          {
+            "leg_id": "leg-1",
+            "action": "transfer",
+            "target_type": "saved_payee",
+            "target_id": "payee-mum",
+            "source_account_id": "acct-matthew-savings",
+            "amount": "50.00",
+            "reference": null,
+            "budget": null,
+            "quantity": null,
+            "display_name": "Mum"
+          }
+        ],
+        "trace_id": null,
+        "latency_ms": 1625,
+        "extractor_calls": [
+          {
+            "latency_ms": 1592,
+            "finish_reason": "stop",
+            "usage": {
+              "prompt_tokens": 1464,
+              "completion_tokens": 65,
+              "total_tokens": 1529,
+              "reasoning_tokens": 0
+            },
+            "content": "{\"intents\": [{\"action\": \"transfer\", \"amount_quote\": \"50\", \"recipient_quote\": \"mom\", \"source_quote\": \"savings\", \"reference_quote\": null, \"relative_to_quote\": null, \"unclear\": []}], \"unclear\": []}"
+          }
+        ],
+        "class": "exact",
+        "comparison": {
+          "exact": true,
+          "expected_legs": 1,
+          "actual_legs": 1,
+          "missing_legs": 0,
+          "extra_legs": 0,
+          "field_errors": [],
+          "secondary_errors": []
+        }
+      },
+      "label": "correct",
+      "policy": {
+        "decision": "PASS",
+        "codes": []
+      },
+      "policy_expected": null,
+      "policy_expectation_met": null,
+      "natural_validation": {
+        "status": "OK",
+        "verdict": "MATCH",
+        "code": null,
+        "issues": [],
+        "latency_ms": 1764,
+        "wall_ms": 1789,
+        "usage": {
+          "completion_tokens": 174,
+          "prompt_tokens": 2195,
+          "total_tokens": 2369
+        },
+        "trace_id": null,
+        "model": "deepseek-flash",
+        "prompt_hash": "19c561a9d19e0cce46a805f09634b65cc6bc4343b64b10131a3b906924f02575",
+        "eligible_for_confirmation": true
+      },
+      "wrong_drafts": [
+        {
+          "id": "w-amount",
+          "kind": "wrong_amount",
+          "built": true,
+          "validation": {
+            "status": "OK",
+            "verdict": "MISMATCH",
+            "code": null,
+            "issues": [
+              {
+                "leg_id": "leg-1",
+                "field": "amount",
+                "reason": "The customer asked to send 50.00 SGD, but the drafted leg transfers 999.00 SGD.",
+                "supported_value": "50.00 SGD",
+                "evidence": [
+                  {
+                    "turn_id": "turn-c40f8a97d3bd4b52",
+                    "start": 5,
+                    "end": 7
+                  }
+                ]
+              }
+            ],
+            "latency_ms": 1885,
+            "wall_ms": 1891,
+            "usage": {
+              "prompt_tokens": 2195,
+              "completion_tokens": 239,
+              "total_tokens": 2434
+            },
+            "trace_id": null,
+            "model": "deepseek-flash",
+            "prompt_hash": "19c561a9d19e0cce46a805f09634b65cc6bc4343b64b10131a3b906924f02575",
+            "case_id": "p2-03-source-answer"
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "p2-04-correct-all-fields",
+      "category": "clarification",
+      "split": "dev_overlap",
+      "expected": {
+        "outcome": "draft",
+        "legs": [
+          {
+            "action": "transfer",
+            "target_type": "saved_payee",
+            "target_id": "payee-ahma",
+            "source_account_id": "acct-matthew-current",
+            "amount": "15.00",
+            "reference": null,
+            "budget": null
+          }
+        ]
+      },
+      "clarify_is_safe": false,
+      "agent": {
+        "status": "draft_frozen",
+        "reason": null,
+        "question": null,
+        "error_code": null,
+        "bundle_id": "8803f030-8c37-4fbd-b630-a14a3541034b",
+        "legs": [
+          {
+            "leg_id": "leg-1",
+            "action": "transfer",
+            "target_type": "saved_payee",
+            "target_id": "payee-ahma",
+            "source_account_id": "acct-matthew-current",
+            "amount": "15.00",
+            "reference": null,
+            "budget": null,
+            "quantity": null,
+            "display_name": "Ah Ma"
+          }
+        ],
+        "trace_id": null,
+        "latency_ms": 1830,
+        "extractor_calls": [
+          {
+            "latency_ms": 1790,
+            "finish_reason": "stop",
+            "usage": {
+              "prompt_tokens": 1472,
+              "completion_tokens": 64,
+              "total_tokens": 1536,
+              "reasoning_tokens": 0
+            },
+            "content": "{\"intents\": [{\"action\": \"transfer\", \"amount_quote\": \"15\", \"recipient_quote\": \"ahma\", \"source_quote\": \"current\", \"reference_quote\": null, \"relative_to_quote\": null, \"unclear\": []}], \"unclear\": []}"
+          }
+        ],
+        "class": "exact",
+        "comparison": {
+          "exact": true,
+          "expected_legs": 1,
+          "actual_legs": 1,
+          "missing_legs": 0,
+          "extra_legs": 0,
+          "field_errors": [],
+          "secondary_errors": []
+        }
+      },
+      "label": "correct",
+      "policy": {
+        "decision": "PASS",
+        "codes": []
+      },
+      "policy_expected": null,
+      "policy_expectation_met": null,
+      "natural_validation": {
+        "status": "OK",
+        "verdict": "MATCH",
+        "code": null,
+        "issues": [],
+        "latency_ms": 5246,
+        "wall_ms": 5274,
+        "usage": {
+          "completion_tokens": 860,
+          "prompt_tokens": 2197,
+          "total_tokens": 3057
+        },
+        "trace_id": null,
+        "model": "deepseek-flash",
+        "prompt_hash": "19c561a9d19e0cce46a805f09634b65cc6bc4343b64b10131a3b906924f02575",
+        "eligible_for_confirmation": true
+      },
+      "wrong_drafts": [
+        {
+          "id": "w-amount",
+          "kind": "wrong_amount",
+          "built": true,
+          "validation": {
+            "status": "OK",
+            "verdict": "MISMATCH",
+            "code": null,
+            "issues": [
+              {
+                "leg_id": "leg-1",
+                "field": "amount",
+                "reason": "The customer corrected the transfer amount to 15.00 SGD, but the drafted leg is 999.00 SGD.",
+                "supported_value": "15.00 SGD",
+                "evidence": [
+                  {
+                    "turn_id": "turn-6f377b5d920f4e54",
+                    "start": 0,
+                    "end": 45
+                  }
+                ]
+              }
+            ],
+            "latency_ms": 2525,
+            "wall_ms": 2531,
+            "usage": {
+              "prompt_tokens": 2197,
+              "completion_tokens": 425,
+              "total_tokens": 2622
+            },
+            "trace_id": null,
+            "model": "deepseek-flash",
+            "prompt_hash": "19c561a9d19e0cce46a805f09634b65cc6bc4343b64b10131a3b906924f02575",
+            "case_id": "p2-04-correct-all-fields"
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "p2-05-transcript-edit",
+      "category": "clarification",
+      "split": "dev_overlap",
+      "expected": {
+        "outcome": "draft",
+        "legs": [
+          {
+            "action": "transfer",
+            "target_type": "saved_payee",
+            "target_id": "payee-ahma",
+            "source_account_id": "acct-matthew-current",
+            "amount": "15.00",
+            "reference": null,
+            "budget": null
+          }
+        ]
+      },
+      "clarify_is_safe": false,
+      "agent": {
+        "status": "draft_frozen",
+        "reason": null,
+        "question": null,
+        "error_code": null,
+        "bundle_id": "9f98f203-aebe-40cd-8786-811b66de7562",
+        "legs": [
+          {
+            "leg_id": "leg-1",
+            "action": "transfer",
+            "target_type": "saved_payee",
+            "target_id": "payee-ahma",
+            "source_account_id": "acct-matthew-current",
+            "amount": "15.00",
+            "reference": null,
+            "budget": null,
+            "quantity": null,
+            "display_name": "Ah Ma"
+          }
+        ],
+        "trace_id": null,
+        "latency_ms": 1944,
+        "extractor_calls": [
+          {
+            "latency_ms": 1907,
+            "finish_reason": "stop",
+            "usage": {
+              "prompt_tokens": 1422,
+              "completion_tokens": 64,
+              "total_tokens": 1486,
+              "reasoning_tokens": 0
+            },
+            "content": "{\"intents\": [{\"action\": \"transfer\", \"amount_quote\": \"15\", \"recipient_quote\": \"ahma\", \"source_quote\": \"current\", \"reference_quote\": null, \"relative_to_quote\": null, \"unclear\": []}], \"unclear\": []}"
+          }
+        ],
+        "class": "exact",
+        "comparison": {
+          "exact": true,
+          "expected_legs": 1,
+          "actual_legs": 1,
+          "missing_legs": 0,
+          "extra_legs": 0,
+          "field_errors": [],
+          "secondary_errors": []
+        }
+      },
+      "label": "correct",
+      "policy": {
+        "decision": "PASS",
+        "codes": []
+      },
+      "policy_expected": null,
+      "policy_expectation_met": null,
+      "natural_validation": {
+        "status": "OK",
+        "verdict": "MATCH",
+        "code": null,
+        "issues": [],
+        "latency_ms": 4612,
+        "wall_ms": 4637,
+        "usage": {
+          "completion_tokens": 681,
+          "prompt_tokens": 2165,
+          "total_tokens": 2846
+        },
+        "trace_id": null,
+        "model": "deepseek-flash",
+        "prompt_hash": "19c561a9d19e0cce46a805f09634b65cc6bc4343b64b10131a3b906924f02575",
+        "eligible_for_confirmation": true
+      },
+      "wrong_drafts": [
+        {
+          "id": "w-amount",
+          "kind": "wrong_amount",
+          "built": true,
+          "validation": {
+            "status": "OK",
+            "verdict": "MISMATCH",
+            "code": null,
+            "issues": [
+              {
+                "leg_id": "leg-1",
+                "field": "amount",
+                "reason": "The customer corrected the request to send 15, but the drafted leg transfers 999.00 SGD.",
+                "supported_value": "15.00 SGD",
+                "evidence": [
+                  {
+                    "turn_id": "turn-52f16992941f4568",
+                    "start": 0,
+                    "end": 28
+                  }
+                ]
+              }
+            ],
+            "latency_ms": 1889,
+            "wall_ms": 1894,
+            "usage": {
+              "prompt_tokens": 2165,
+              "completion_tokens": 283,
+              "total_tokens": 2448
+            },
+            "trace_id": null,
+            "model": "deepseek-flash",
+            "prompt_hash": "19c561a9d19e0cce46a805f09634b65cc6bc4343b64b10131a3b906924f02575",
+            "case_id": "p2-05-transcript-edit"
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "p2-06-recipient-answer",
+      "category": "clarification",
+      "split": "dev_overlap",
+      "expected": {
+        "outcome": "draft",
+        "legs": [
+          {
+            "action": "transfer",
+            "target_type": "saved_payee",
+            "target_id": "payee-mum",
+            "source_account_id": "acct-matthew-savings",
+            "amount": "30.00",
+            "reference": null,
+            "budget": null
+          }
+        ]
+      },
+      "clarify_is_safe": false,
+      "agent": {
+        "status": "draft_frozen",
+        "reason": null,
+        "question": null,
+        "error_code": null,
+        "bundle_id": "274dfffc-be3d-4c72-80be-02ccae664a7a",
+        "legs": [
+          {
+            "leg_id": "leg-1",
+            "action": "transfer",
+            "target_type": "saved_payee",
+            "target_id": "payee-mum",
+            "source_account_id": "acct-matthew-savings",
+            "amount": "30.00",
+            "reference": null,
+            "budget": null,
+            "quantity": null,
+            "display_name": "Mum"
+          }
+        ],
+        "trace_id": null,
+        "latency_ms": 1734,
+        "extractor_calls": [
+          {
+            "latency_ms": 1691,
+            "finish_reason": "stop",
+            "usage": {
+              "prompt_tokens": 1464,
+              "completion_tokens": 65,
+              "total_tokens": 1529,
+              "reasoning_tokens": 0
+            },
+            "content": "{\"intents\": [{\"action\": \"transfer\", \"amount_quote\": \"30\", \"recipient_quote\": \"mom\", \"source_quote\": \"savings\", \"reference_quote\": null, \"relative_to_quote\": null, \"unclear\": []}], \"unclear\": []}"
+          }
+        ],
+        "class": "exact",
+        "comparison": {
+          "exact": true,
+          "expected_legs": 1,
+          "actual_legs": 1,
+          "missing_legs": 0,
+          "extra_legs": 0,
+          "field_errors": [],
+          "secondary_errors": []
+        }
+      },
+      "label": "correct",
+      "policy": {
+        "decision": "PASS",
+        "codes": []
+      },
+      "policy_expected": null,
+      "policy_expectation_met": null,
+      "natural_validation": {
+        "status": "OK",
+        "verdict": "MATCH",
+        "code": null,
+        "issues": [],
+        "latency_ms": 1249,
+        "wall_ms": 1272,
+        "usage": {
+          "completion_tokens": 119,
+          "prompt_tokens": 2194,
+          "total_tokens": 2313
+        },
+        "trace_id": null,
+        "model": "deepseek-flash",
+        "prompt_hash": "19c561a9d19e0cce46a805f09634b65cc6bc4343b64b10131a3b906924f02575",
+        "eligible_for_confirmation": true
+      },
+      "wrong_drafts": [
+        {
+          "id": "w-amount",
+          "kind": "wrong_amount",
+          "built": true,
+          "validation": {
+            "status": "OK",
+            "verdict": "MISMATCH",
+            "code": null,
+            "issues": [
+              {
+                "leg_id": "leg-1",
+                "field": "amount",
+                "reason": "The customer asked to send 30.00 SGD, but the drafted transfer is 999.00 SGD.",
+                "supported_value": "30.00 SGD",
+                "evidence": [
+                  {
+                    "turn_id": "turn-26df6df503334836",
+                    "start": 5,
+                    "end": 7
+                  }
+                ]
+              }
+            ],
+            "latency_ms": 1565,
+            "wall_ms": 1569,
+            "usage": {
+              "prompt_tokens": 2194,
+              "completion_tokens": 231,
+              "total_tokens": 2425
+            },
+            "trace_id": null,
+            "model": "deepseek-flash",
+            "prompt_hash": "19c561a9d19e0cce46a805f09634b65cc6bc4343b64b10131a3b906924f02575",
+            "case_id": "p2-06-recipient-answer"
+          }
+        }
+      ]
+    }
+  ]
+}

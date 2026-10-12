@@ -31,6 +31,10 @@ class PayeeResponse(_BankBase):
     masked_suffix: str | None = None
     kind: str
     sanctioned: bool = False
+    #: Bank aliases and customer nicknames (exact names for this payee).
+    names: list[str] = []
+    #: "exact", or "fuzzy" for a near spelling the agent may only suggest.
+    match: str = "exact"
 
 
 class BillerResponse(_BankBase):

@@ -22,17 +22,19 @@ from __future__ import annotations
 
 import logging
 import threading
-from collections.abc import AsyncIterator, Iterator
-from contextlib import asynccontextmanager
+from collections.abc import AsyncIterator
+from contextlib import ExitStack, asynccontextmanager
 from typing import Annotated, Any
 
 import httpx
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from agent.extraction import ExtractorLLM, OpenAICompatibleExtractor
 from agent.gateway_client import GatewayClient
 from agent.workflow import AgentDeps, run_agent
+from shared.deadline import DEADLINE_HEADER, Deadline, DeadlineExpired, current_deadline
 from shared.settings import load_agent_settings
 from shared.telemetry import Telemetry, extract_trace_context, httpx_request_hook
 
@@ -52,10 +54,28 @@ def get_telemetry() -> Telemetry | None:
 
 
 @asynccontextmanager
-async def _lifespan(_: FastAPI) -> AsyncIterator[None]:
-    yield
-    if _telemetry is not None:
-        _telemetry.shutdown()
+async def _lifespan(application: FastAPI) -> AsyncIterator[None]:
+    settings = load_agent_settings()
+    with ExitStack() as stack:
+        extractor = (
+            OpenAICompatibleExtractor.from_settings(settings) if settings.llm_enabled else None
+        )
+        if extractor is not None:
+            stack.callback(extractor.close)
+        application.state.extractor = extractor
+        application.state.gateway_http = stack.enter_context(
+            httpx.Client(
+                base_url=settings.gateway_base_url,
+                timeout=GATEWAY_TIMEOUT_SECONDS,
+                event_hooks={"request": [httpx_request_hook]},
+            )
+        )
+        try:
+            yield
+        finally:
+            if _telemetry is not None:
+                _telemetry.shutdown()
+            application.state.extractor = None
 
 
 app = FastAPI(title="DCTA Agent", docs_url="/docs", redoc_url=None, lifespan=_lifespan)
@@ -69,21 +89,13 @@ class RunRequest(BaseModel):
     conversation_id: str = Field(..., min_length=1, max_length=128)
 
 
-def get_extractor() -> ExtractorLLM | None:
-    settings = load_agent_settings()
-    if not settings.llm_enabled:
-        return None
-    return OpenAICompatibleExtractor.from_settings(settings)
+def get_extractor(request: Request) -> ExtractorLLM | None:
+    return request.app.state.extractor
 
 
-def get_gateway_http() -> Iterator[httpx.Client]:
-    settings = load_agent_settings()
-    with httpx.Client(
-        base_url=settings.gateway_base_url,
-        timeout=GATEWAY_TIMEOUT_SECONDS,
-        event_hooks={"request": [httpx_request_hook]},  # carries traceparent only
-    ) as client:
-        yield client
+def get_gateway_http(request: Request) -> httpx.Client:
+    # GatewayClient supplies the caller's delegation token on each request, never here.
+    return request.app.state.gateway_http
 
 
 def _bearer_token(authorization: str | None) -> str:
@@ -121,8 +133,34 @@ def run(
     if llm is None:
         return {"status": "error", "code": "EXTRACTOR_UNAVAILABLE"}
     deps = AgentDeps(gateway=GatewayClient(http, token), llm=llm, telemetry=telemetry)
+    budget = Deadline.from_header(
+        request.headers.get(DEADLINE_HEADER), load_agent_settings().extract_timeout_seconds + 5
+    )
+    deadline_token = current_deadline.set(budget)
     try:
-        return run_agent(body.conversation_id, deps, parent=extract_trace_context(request.headers))
+        budget.remaining()
+        outcome = run_agent(
+            body.conversation_id, deps, parent=extract_trace_context(request.headers)
+        )
+        budget.remaining()
+        return outcome
+    except DeadlineExpired:
+        return {"status": "error", "code": "AGENT_TIMEOUT"}
     except Exception:  # noqa: BLE001 - fail closed: no proposal, no internals leaked
         logger.exception("agent run failed")
         return {"status": "error", "code": "AGENT_INTERNAL_ERROR"}
+    finally:
+        current_deadline.reset(deadline_token)
+
+
+@app.get("/ready")
+def ready() -> JSONResponse:
+    """Configuration readiness only; never invokes the extractor or provider."""
+    settings = load_agent_settings()
+    if not settings.llm_enabled or not settings.extract_model.strip():
+        return JSONResponse(
+            {"status": "unavailable", "code": "EXTRACTOR_NOT_CONFIGURED"},
+            status_code=503,
+            headers={"Cache-Control": "no-store"},
+        )
+    return JSONResponse({"status": "ready"}, headers={"Cache-Control": "no-store"})

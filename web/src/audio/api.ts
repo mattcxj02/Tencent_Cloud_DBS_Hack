@@ -3,7 +3,7 @@
 // TRTC and appends one `user_asr_final` turn. The transcript is shown to the user, who can
 // correct it (POST .../transcript-edit) before anything is drafted or approved.
 // `consent=true` is always sent: the UI must ask the user once before the first upload.
-import { ApiError, type Turn } from '../api'
+import { request, type Turn } from '../api'
 
 export interface VoiceAsrInfo {
   /** TRTC request ID (correlation only). */
@@ -38,41 +38,13 @@ export interface VoiceResponse {
  * ASR_NO_SPEECH, ASR_TIMEOUT, AUDIO_TOO_LONG, or SESSION_REQUIRED / NETWORK_ERROR.
  * On ASR failures the recording is kept; `error.body.detail.audio_id` names it.
  */
-export async function uploadVoice(conversationId: string, blob: Blob): Promise<VoiceResponse> {
+export async function uploadVoice(conversationId: string, blob: Blob, operationId?: string, signal?: AbortSignal): Promise<VoiceResponse> {
   const wav = blob.type === 'audio/wav' ? blob : new Blob([blob], { type: 'audio/wav' })
   const form = new FormData()
   form.append('audio', wav, 'clip.wav')
   form.append('consent', 'true')
-  let res: Response
-  try {
-    res = await fetch(`/api/conversations/${encodeURIComponent(conversationId)}/voice`, {
-      method: 'POST',
-      body: form,
-      credentials: 'same-origin',
-      cache: 'no-store',
-    })
-  } catch {
-    throw new ApiError(0, 'NETWORK_ERROR', [], null)
-  }
-  const data: unknown = await res.json().catch(() => null)
-  if (!res.ok) {
-    const body =
-      data !== null && typeof data === 'object' && !Array.isArray(data)
-        ? (data as Record<string, unknown>)
-        : null
-    throw new ApiError(res.status, voiceErrorCode(res.status, body), [], body)
-  }
-  return data as VoiceResponse
-}
-
-function voiceErrorCode(status: number, body: Record<string, unknown> | null): string {
-  if (status === 401) return 'SESSION_REQUIRED'
-  const detail = body?.detail
-  if (typeof detail === 'string') return detail
-  if (detail !== null && typeof detail === 'object' && !Array.isArray(detail)) {
-    const code = (detail as Record<string, unknown>).code
-    if (typeof code === 'string') return code
-  }
-  if (Array.isArray(detail)) return 'INVALID_REQUEST'
-  return `HTTP_${status}`
+  const query = operationId ? `?operation_id=${encodeURIComponent(operationId)}` : ''
+  return request<VoiceResponse>('POST', `/conversations/${encodeURIComponent(conversationId)}/voice${query}`, {
+    form, signal, timeoutMs: 35000,
+  })
 }

@@ -17,3 +17,10 @@ Push-to-talk voice capture for T-12. The browser records the microphone, encodes
 **Consent.** `uploadVoice` always sends `consent=true`; the UI must ask the user once ("Your recording is stored as evidence for 90 days") before the first upload.
 
 **Limitations.** No streaming or interim results (sentence recognition only). Downsampling uses a simple box filter (fine for speech recognition, not hi-fi). A phone needs an HTTPS origin for both the microphone and WebAuthn. No automated browser test: the capture path was type-checked and its encoder output was checked against the gateway's `validate_wav` and live TRTC from Node; a manual browser check (record, deny permission, cancel) is still required.
+
+Phase 5: `uploadVoice` uses the shared bounded transport (35 s including the response
+body) and accepts an optional progress operation UUID and abort signal. Chat polls
+gateway-reported transcription stages and can recover the existing transcript after
+a lost upload response. The transcript still drafts automatically; correcting it
+creates a new revision and supersedes any work in flight. Aborting browser observation
+cannot undo a completed ASR turn or an approved payment.

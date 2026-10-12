@@ -11,7 +11,6 @@ is exercised separately in ``test_agent_gateway_integration.py``.
 from __future__ import annotations
 
 import json
-import re
 from collections.abc import Callable
 from decimal import ROUND_DOWN, Decimal
 from typing import Any
@@ -22,6 +21,7 @@ import httpx
 from agent.extraction import LLMReply
 from agent.gateway_client import GatewayClient
 from agent.workflow import AgentDeps, run_agent
+from shared.names import fuzzy_mentions, mentions, normalize
 
 TOKEN = "dcta_fake-delegation-token"
 TS = "2026-10-10T00:00:00.000Z"
@@ -66,7 +66,19 @@ PAYEES = [
     {**_payee("payee-northwind", "Northwind Trading", "CITI", "1100"), "sanctioned": True},
     _payee("payee-priya", "Priya", None, "**12", kind="paynow"),
 ]
-ALIASES = {"mum": "payee-mum", "ah ma": "payee-ahma"}
+ALIASES = {
+    "mum": "payee-mum",
+    "ah ma": "payee-ahma",
+    "mom": "payee-mum",
+    "mummy": "payee-mum",
+    "mommy": "payee-mum",
+    "mama": "payee-mum",
+    "ah mah": "payee-ahma",
+    "amah": "payee-ahma",
+    "grandma": "payee-ahma",
+}
+#: Customer nicknames (payee_nicknames); tests add to this per FakeGateway instance.
+NICKNAMES: dict[str, str] = {}
 BILLERS = [
     _biller("biller-spgroup", "SP Group", "utilities", "SP-REF-2026-001"),
     _biller("biller-singtel", "Singtel", "telecom", "SG-REF-2026-002"),
@@ -78,13 +90,8 @@ SGX_NAMES = {"D05": ("dbs",), "O39": ("ocbc",), "U11": ("uob",), "Z74": ("singte
 USER_ROLES = {"user_text", "user_asr_final", "user_transcript_edit", "user_answer"}
 
 
-def _norm(text: str) -> str:
-    return " ".join(re.findall(r"[a-z0-9]+", text.casefold()))
-
-
 def _mentions(text: str, names: tuple[str, ...]) -> bool:
-    hay = f" {_norm(text)} "
-    return any(name and f" {_norm(name)} " in hay for name in names)
+    return mentions(text, names)  # the gateway's rule (shared)
 
 
 class Rejected(Exception):
@@ -108,6 +115,7 @@ class FakeGateway:
         self.reject_next: list[str] = []
         self.requests: list[httpx.Request] = []
         self.fail_snapshot: int | None = None
+        self.nicknames: dict[str, str] = dict(NICKNAMES)
 
     # ── user side (what the browser would append via /api) ──────────
 
@@ -193,11 +201,21 @@ class FakeGateway:
             "turns": self.turns,
         }
 
+    def names_of(self, payee_id: str) -> list[str]:
+        return [n for n, pid in {**ALIASES, **self.nicknames}.items() if pid == payee_id]
+
     def search(self, query: str) -> list[dict[str, Any]]:
-        q = query.strip().casefold()
-        hits = [p for p in PAYEES if ALIASES.get(q) == p["payee_id"]]
-        hits += [p for p in PAYEES if q in p["display_name"].casefold() and p not in hits]
-        return [{"sanctioned": False, **p} for p in hits]
+        """Same contract as ``BankStore.search_payees``: exact first, then near spellings."""
+        q = query.strip()
+        exact, fuzzy = [], []
+        for p in PAYEES:
+            extra = self.names_of(p["payee_id"])
+            full = (p["display_name"], *extra)
+            if q.casefold() in p["display_name"].casefold() or mentions(q, full):
+                exact.append({"sanctioned": False, **p, "names": extra, "match": "exact"})
+            elif fuzzy_mentions(q, (*full, *p["display_name"].split())):
+                fuzzy.append({"sanctioned": False, **p, "names": extra, "match": "fuzzy"})
+        return exact + fuzzy
 
     def _quote(self, symbol: str) -> httpx.Response:
         symbol = symbol.upper()
@@ -232,8 +250,7 @@ class FakeGateway:
         if not span["text"].strip() or turn["text"][span["start"] : span["end"]] != span["text"]:
             raise Rejected("EVIDENCE_SPAN_MISMATCH")
 
-    @staticmethod
-    def _candidates(target_type: str) -> dict[str, tuple[str, ...]]:
+    def _candidates(self, target_type: str) -> dict[str, tuple[str, ...]]:
         if target_type == "own_account":
             return {a["account_id"]: (a["type"], a["masked_suffix"]) for a in ACCOUNTS}
         if target_type in ("saved_payee", "saved_paynow"):
@@ -242,7 +259,7 @@ class FakeGateway:
             for p in PAYEES:
                 if p["kind"] != kind:
                     continue
-                aliases = tuple(a for a, pid in ALIASES.items() if pid == p["payee_id"])
+                aliases = tuple(self.names_of(p["payee_id"]))
                 suffix = (p["masked_suffix"],) if p["masked_suffix"] else ()
                 out[p["payee_id"]] = (
                     p["display_name"],
@@ -291,7 +308,7 @@ class FakeGateway:
                 raise Rejected("EVIDENCE_MISSING")
             self._cite(ev["amount"])
             ref = (leg.get("reference") or "").strip()
-            if ref and _norm(ev["amount"]["text"]) in _norm(ref):
+            if ref and normalize(ev["amount"]["text"]) in normalize(ref):
                 raise Rejected("AMOUNT_FROM_REFERENCE")
             self._identify(leg["target_type"], leg["target_id"], ev["target"], "TARGET_EVIDENCE")
             self._identify("own_account", leg["source_account_id"], ev["source"], "SOURCE_EVIDENCE")

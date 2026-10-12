@@ -28,7 +28,8 @@ from shared.clients.validator import (
     validation_input_hash,
     verdict_problem,
 )
-from validator.llm import LLMClient, LLMReply, LLMTimeoutError
+from shared.deadline import Deadline, DeadlineExpired, bounded_call
+from validator.llm import LLMClient, LLMConfigurationError, LLMReply, LLMTimeoutError
 from validator.prompt import PROMPT_HASH, build_messages
 
 __all__ = ["MAX_OUTPUT_CHARS", "ValidatorService", "interpret_reply"]
@@ -109,10 +110,15 @@ class ValidatorService:
         self._timeout = timeout_seconds
         self._executor = executor or _EXECUTOR
 
-    def run(self, request: ValidationRequest) -> ValidationResult:
+    def run(
+        self, request: ValidationRequest, *, deadline: Deadline | None = None
+    ) -> ValidationResult:
         input_hash = validation_input_hash(request)
         started = time.monotonic()
-        outcome, usage = self._call_and_check(request)
+        budget = (
+            deadline.child(self._timeout) if deadline is not None else Deadline.after(self._timeout)
+        )
+        outcome, usage = self._call_and_check(request, budget)
         latency_ms = int((time.monotonic() - started) * 1000)
         common: dict[str, Any] = {
             "model": self._model,
@@ -138,16 +144,20 @@ class ValidatorService:
         return result
 
     def _call_and_check(
-        self, request: ValidationRequest
+        self, request: ValidationRequest, budget: Deadline
     ) -> tuple[VerdictPayload | ErrorCode, TokenUsage | None]:
         if self._llm is None:
             return "LLM_NOT_CONFIGURED", None
         messages = build_messages(request)
-        future = self._executor.submit(self._llm.complete, messages, timeout_seconds=self._timeout)
+
+        def call() -> LLMReply:
+            return self._llm.complete(messages, timeout_seconds=budget.remaining())
+
         try:
-            reply = future.result(timeout=self._timeout)
-        except (TimeoutError, LLMTimeoutError):
-            future.cancel()
+            reply = bounded_call(self._executor, budget, call)
+        except LLMConfigurationError:
+            return "LLM_CONFIGURATION_ERROR", None
+        except (DeadlineExpired, LLMTimeoutError):
             return "LLM_TIMEOUT", None
         except Exception as exc:  # noqa: BLE001 - every provider failure fails closed
             logger.warning("validator model call failed: %s", type(exc).__name__)

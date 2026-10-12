@@ -8,9 +8,12 @@ a user turn, approve, sign or execute. The ``httpx.Client`` is injected so tests
 
 from __future__ import annotations
 
+from contextlib import suppress
 from typing import Any
 
 import httpx
+
+from shared.deadline import DEADLINE_HEADER, check_deadline, current_deadline, remaining_timeout
 
 __all__ = ["DraftRejected", "GatewayClient", "GatewayError"]
 
@@ -38,10 +41,17 @@ class GatewayClient:
     # ── transport ────────────────────────────────────────────────────
 
     def _request(self, method: str, path: str, **kwargs: Any) -> Any:
+        check_deadline()
+        headers = dict(self._headers)
+        budget = current_deadline.get()
+        if budget is not None:
+            headers[DEADLINE_HEADER] = budget.header()
+            kwargs["timeout"] = remaining_timeout(15.0)
         try:
-            resp = self._http.request(method, path, headers=self._headers, **kwargs)
+            resp = self._http.request(method, path, headers=headers, **kwargs)
         except httpx.HTTPError:
             raise GatewayError(0, "GATEWAY_UNAVAILABLE") from None
+        check_deadline()
         if resp.is_success:
             return resp.json()
         raise GatewayError(resp.status_code, _error_code(resp))
@@ -51,9 +61,33 @@ class GatewayClient:
     def snapshot(self, conversation_id: str) -> dict[str, Any]:
         return self._request("GET", f"/internal/conversations/{conversation_id}/snapshot")
 
-    def propose_question(self, conversation_id: str, text: str) -> dict[str, Any]:
+    def report_progress(self, conversation_id: str, revision: int, stage: str) -> None:
+        # Progress loss cannot alter payment eligibility.
+        with suppress(GatewayError):
+            self._request(
+                "POST",
+                f"/internal/conversations/{conversation_id}/progress",
+                json={"revision": revision, "stage": stage},
+            )
+
+    def propose_question(
+        self,
+        conversation_id: str,
+        text: str,
+        *,
+        revision: int | None = None,
+        fields: list[dict] | None = None,
+        extraction: dict | None = None,
+    ) -> dict[str, Any]:
         return self._request(
-            "POST", f"/internal/conversations/{conversation_id}/questions", json={"text": text}
+            "POST",
+            f"/internal/conversations/{conversation_id}/questions",
+            json={
+                "text": text,
+                "revision": revision,
+                "fields": fields or [],
+                "extraction": extraction,
+            },
         )
 
     # ── bank reads ───────────────────────────────────────────────────
@@ -63,6 +97,9 @@ class GatewayClient:
 
     def search_payees(self, query: str) -> list[dict[str, Any]]:
         return self._request("GET", "/internal/bank/payees/search", params={"q": query})
+
+    def list_payees(self) -> list[dict[str, Any]]:
+        return self._request("GET", "/internal/bank/payees")
 
     def list_billers(self) -> list[dict[str, Any]]:
         return self._request("GET", "/internal/bank/billers")

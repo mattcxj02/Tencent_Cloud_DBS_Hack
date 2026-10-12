@@ -1,6 +1,6 @@
 # agent
 
-The drafting agent service (FastAPI, port 8001, internal only). It turns a stored conversation into an **untrusted** draft proposal or one clarifying question. It never validates, approves, signs or moves money.
+The drafting agent service (FastAPI, port 8001, internal only). It turns a stored conversation into an **untrusted** draft proposal or a clarification group. It never validates, approves, signs or moves money.
 
 | File | Purpose |
 |---|---|
@@ -16,13 +16,21 @@ The drafting agent service (FastAPI, port 8001, internal only). It turns a store
 
 **Workflow** (`ingest → extract → normalize → resolve → clarify | propose → result`; routing is code):
 
-- `ingest`: snapshot via the gateway; bounded to 40 turns / 8,000 characters, else `error CONTEXT_LIMIT_EXCEEDED` (no silent truncation).
+- `ingest`: snapshot via the gateway; bounded to 40 turns / 8,000 characters, else `error CONTEXT_LIMIT_EXCEEDED` (no silent truncation). A gateway-verified structured answer restores the question's untrusted extraction checkpoint, replacing only the selected fields with the gateway's exact spans; this path skips `extract`.
 - `extract`: the model returns quoted words only (`action`, `amount_quote`, `recipient_quote`, `source_quote`, `reference_quote`, `relative_to_quote`, `unclear`). No IDs, offsets or display names. Empty, malformed or schema-invalid output → `error`, no proposal.
 - `normalize`: at most 4 legs, supported actions; every quote must be found verbatim (whole words, current user turns, never app questions) and never inside a reference or double-quoted text; amounts parsed by `shared/amounts.py`; "half of that" links to exactly one earlier leg, otherwise ask.
 - `resolve`: all candidates from the bank READ API; one candidate or ask. Strong names (full name, alias, suffix) beat a shared first name. Card balance uses the card's authoritative outstanding amount; equities get a fresh quote. The cited words are narrowed so they name only the resolved record ("John Doe" → "Doe").
 - `propose`: `POST /internal/drafts` with typed `amount_expr` and evidence spans. The gateway re-checks and freezes; evidence/ambiguity rejections become a question, `QUOTE_EXPIRED` re-quotes once, anything else is an `error`.
-- `clarify`: one short question via `POST /internal/conversations/{id}/questions`.
+- `clarify`: one group via `POST /internal/conversations/{id}/questions`, collecting missing recipient/source fields across legs. Record questions have explicit choices and a none-of-these fallback. Groups with an amount or other unsupported issue use free text. Free text, transcript edits, changed intent and unusable checkpoints run extraction again; dependencies are recomputed and frozen drafts still require independent validation.
 
 Each stage reports a small `agent.*` audit event (best effort) carrying the Langfuse trace and span IDs. Langfuse gets one trace per run: stage spans with outcome/reason codes and an `extractor` generation with model, prompt version and SHA-256, the conversation data the model saw, the parsed quotes, usage and latency. The system prompt (identified by hash), reasoning tokens, the delegation token and headers are never exported; `shared.telemetry` redacts again before export. Telemetry failures never change the outcome.
 
 **Boundary (invariant I1):** may import `shared/` only, never `gateway/` or `ledger/` (`tests/test_isolation.py`). It reads the conversation and bank data over HTTP with the gateway's short-lived delegation token for one user and conversation, and can only propose drafts and questions and report `agent.*` events. Its container image contains no gateway or ledger code (see `infra/`). Tests: `tests/test_agent_workflow.py`, `tests/test_agent_units.py`, `tests/test_agent_telemetry.py`, `tests/test_agent_gateway_integration.py` (real gateway), `tests/test_amounts.py`; live extract smoke with a Langfuse trace: `scripts/smoke_extract.py`.
+
+**Readiness and request budget.** `GET /health` is liveness; `GET /ready` checks model key/model presence without a provider call or extractor construction (200 `ready`, 503 `EXTRACTOR_NOT_CONFIGURED`). The gateway checks this before delegating extraction. Provider authentication/credits are checked by live smoke tests, not readiness. `EXTRACT_TIMEOUT_SECONDS` defaults to 40 and `EXTRACT_MAX_RETRIES` to 0. Delegated runs honour `X-DCTA-Deadline` throughout the workflow and callbacks; provider and gateway HTTP timeouts receive only the remaining budget. Provider work is bounded even when it ignores its socket timeout, and queued calls check the deadline before starting. SDK retries are disabled for delegated runs; `EXTRACT_MAX_RETRIES` applies to standalone extraction. Every stage rechecks the owned snapshot; late results cannot resolve, freeze or publish a question. Closing transport does not guarantee remote generation stops. Restart after changing settings.
+
+Phase 5: the fixed workflow reports `extracting` and `resolving` at actual node entry
+using `GatewayClient.report_progress`. The gateway requires an active delegated run,
+owner and matching conversation revision. Progress reporting is best effort and
+carries no payment payload or verdict; missed reports never alter eligibility. The
+agent has no authority to publish ready/validated progress or authorize funds.

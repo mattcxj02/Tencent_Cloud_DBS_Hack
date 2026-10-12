@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { api } from '../api'
 import type { DraftBundle, Turn, ValidationIssue, ValidationView } from '../api'
-import { describeCode } from '../messages'
+import { describeCode, isConfigurationError } from '../messages'
 import { fromDraftLeg } from '../legs'
 import type { LegChange, LegView } from '../legs'
 import { useAnnounce, useSession } from '../session'
@@ -59,8 +59,9 @@ function IssueItem({ issue, legs, turns }: { issue: ValidationIssue; legs: LegVi
   )
 }
 
-function guidance(v: ValidationView | null, status: DraftBundle['status']): { title: string; body: string; action: 'edit' | 'retry' | 'redraft' | 'restate' | 'wait' } {
+function guidance(v: ValidationView | null, status: DraftBundle['status']): { title: string; body: string; action: 'edit' | 'retry' | 'redraft' | 'restate' | 'wait' | 'unavailable' } {
   if (!v) return { title: 'The independent check result is missing', body: 'This draft cannot be approved without it.', action: 'retry' }
+  if (v.code && isConfigurationError(v.code)) return { title: 'The payment assistant is unavailable', body: describeCode(v.code), action: 'unavailable' }
   switch (v.next_action) {
     case 'WAIT':
       return { title: 'Still checking this draft…', body: 'The independent check is running.', action: 'wait' }
@@ -103,6 +104,7 @@ export function DraftReview({
   onDismiss,
   onNewConversation,
   onValidated,
+  onRetryValidation,
 }: {
   draft: DraftBundle
   changes: LegChange[]
@@ -112,6 +114,7 @@ export function DraftReview({
   onDismiss: () => void
   onNewConversation: () => void
   onValidated: (v: ValidationView) => void
+  onRetryValidation: () => void
 }) {
   const { accounts } = useSession()
   const announce = useAnnounce()
@@ -128,16 +131,20 @@ export function DraftReview({
   // Validation still running: poll its stored result (read-only) for a short while.
   useEffect(() => {
     if (g.action !== 'wait' || polls >= 15) return
+    let active = true
+    const controller = new AbortController()
     const id = window.setTimeout(async () => {
       try {
-        const v = await api.validation(draft.bundle_id)
+        const v = await api.validation(draft.bundle_id, controller.signal)
+        if (!active) return
         if (v.next_action !== 'WAIT') onValidated(v)
         else setPolls((p) => p + 1)
       } catch {
+        if (!active) return
         setPolls((p) => p + 1)
       }
     }, 2000)
-    return () => window.clearTimeout(id)
+    return () => { active = false; controller.abort(); window.clearTimeout(id) }
   }, [g.action, polls, draft.bundle_id, onValidated])
 
   const issues = draft.validation?.issues ?? []
@@ -164,7 +171,7 @@ export function DraftReview({
         </div>
         <div className="flex flex-wrap gap-2">
           {g.action === 'retry' || (g.action === 'wait' && polls >= 15) ? (
-            <Button onClick={onRedraft}>Check again</Button>
+            <Button onClick={onRetryValidation}>Retry validation of saved draft</Button>
           ) : g.action === 'redraft' ? (
             <Button onClick={onRedraft}>Prepare a new draft</Button>
           ) : g.action === 'restate' ? (

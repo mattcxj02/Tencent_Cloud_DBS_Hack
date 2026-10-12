@@ -27,6 +27,7 @@ import threading
 from datetime import timedelta
 from pathlib import Path
 from typing import Annotated, Any
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
 from fastapi.responses import Response
@@ -219,7 +220,7 @@ def _read_stored(store: ConversationStore, audio_id: str) -> tuple[bytes, str]:
 
 
 def _user_hotwords(store: ConversationStore, user_id: str) -> list[str]:
-    """The user's saved payee names and aliases and saved billers, as ASR hotwords.
+    """The user's saved payee names, aliases, nicknames and saved billers, as ASR hotwords.
 
     Only the user's own bank records; a failure here must never block transcription.
     """
@@ -229,9 +230,10 @@ def _user_hotwords(store: ConversationStore, user_id: str) -> list[str]:
             rows = conn.execute(
                 "SELECT display_name AS w FROM payees WHERE owner_user_id = ? "
                 "UNION SELECT alias FROM payee_aliases WHERE owner_user_id = ? "
+                "UNION SELECT nickname FROM payee_nicknames WHERE owner_user_id = ? "
                 "UNION SELECT b.display_name FROM saved_billers sb "
                 "JOIN billers b ON b.biller_id = sb.biller_id WHERE sb.user_id = ?",
-                (user_id, user_id, user_id),
+                (user_id, user_id, user_id, user_id),
             ).fetchall()
         finally:
             conn.close()
@@ -247,6 +249,7 @@ def upload_voice(
     user: UserSession,
     audio: Annotated[UploadFile | None, File()] = None,
     consent: Annotated[str | None, Form()] = None,
+    operation_id: UUID | None = None,
 ) -> dict[str, Any]:
     """Store one push-to-talk WAV clip, transcribe it with TRTC and append the final turn.
 
@@ -263,6 +266,13 @@ def upload_voice(
     if not _owns(store, user.user_id, conversation_id):
         raise _not_found()
 
+    from gateway.progress import Progress, register
+
+    snapshot = store.get_snapshot(conversation_id)
+    progress = Progress(
+        store._db_path, user.user_id, conversation_id, snapshot["revision"], kind="voice"
+    )
+    register(progress, str(operation_id) if operation_id else None)
     telemetry = get_voice_telemetry()
     with telemetry.workflow_span(
         "ingest",
@@ -272,10 +282,22 @@ def upload_voice(
     ) as span:
         trace = (span.trace_id, span.observation_id)
         try:
-            result = _ingest(store, user.user_id, conversation_id, audio, consent, trace, span)
+            result = _ingest(
+                store, user.user_id, conversation_id, audio, consent, trace, span, progress
+            )
         except HTTPException as exc:
+            detail = exc.detail
+            progress.finish(
+                code=detail.get("code", "ASR_UNAVAILABLE")
+                if isinstance(detail, dict)
+                else "ASR_UNAVAILABLE"
+            )
             span.set_attributes({"http_status": exc.status_code})
             raise
+        except Exception:
+            progress.finish(code="ASR_UNAVAILABLE")
+            raise
+        progress.finish(result=result)
         result["trace_id"] = trace[0]
         span.set_attributes({"http_status": 200})
         return result
@@ -289,6 +311,7 @@ def _ingest(
     consent: str | None,
     trace: tuple[str | None, str | None],
     span: Any,
+    progress: Any,
 ) -> dict[str, Any]:
     def reject(http_status: int, code: str, message: str, **extra: Any) -> HTTPException:
         span.set_status("rejected", reason_code=code)
@@ -369,6 +392,7 @@ def _ingest(
         trace,
     )
 
+    progress.update("transcribing")
     # 3. Transcribe the stored bytes.
     span.set_output(
         {

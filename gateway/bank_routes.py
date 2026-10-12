@@ -81,6 +81,24 @@ async def search_payees(
 # ── Billers ─────────────────────────────────────────────────────────
 
 
+@router.get("/payees", response_model=list[PayeeResponse])
+async def list_saved_payees(principal: BankReadPrincipal) -> list[dict]:
+    from gateway.payees import list_payees
+
+    records = list_payees(get_bank_store()._db_path, principal.user_id)
+    return [
+        {
+            "payee_id": p["payee_id"],
+            "display_name": p["display_name"],
+            "bank": p["bank"],
+            "masked_suffix": p["masked_suffix"],
+            "kind": p["kind"],
+            "names": [*p["aliases"], *p["nicknames"]],
+        }
+        for p in records[:MAX_LIST_SIZE]
+    ]
+
+
 @router.get("/billers", response_model=list[BillerResponse])
 async def list_billers(principal: BankReadPrincipal) -> list[dict]:
     store = get_bank_store()

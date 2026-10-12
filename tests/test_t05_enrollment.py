@@ -1,7 +1,7 @@
 """Tests for T-05: WebAuthn enrollment flow.
 
 Covers:
-- Enrollment code generation, consumption, single-use, expiry.
+- Enrollment code generation, reservation, successful consumption, single-use, expiry.
 - Registration options issuance.
 - Registration verification and credential storage.
 - Wrong/expired/used enrollment codes rejected.
@@ -84,24 +84,29 @@ def client(temp_db):
 
 
 class TestEnrollmentCode:
-    def test_create_and_consume(self, temp_db):
+    def test_create_and_begin(self, temp_db):
         _, _, identity = temp_db
         code = identity.create_enrollment_code("user-matthew")
         assert len(code) > 16
-        user_id = identity.consume_enrollment_code(code)
+        user_id = identity.begin_enrollment(code, b"unit-challenge")
         assert user_id == "user-matthew"
 
     def test_wrong_code_rejected(self, temp_db):
         _, _, identity = temp_db
         with pytest.raises(ValueError, match="invalid enrollment code"):
-            identity.consume_enrollment_code("totally-wrong-code")
+            identity.begin_enrollment("totally-wrong-code", b"unit-challenge")
 
     def test_single_use(self, temp_db):
         _, _, identity = temp_db
         code = identity.create_enrollment_code("user-matthew")
-        identity.consume_enrollment_code(code)
+        challenge = b"unit-challenge"
+        identity.begin_enrollment(code, challenge)
+        identity.complete_enrollment(
+            challenge, credential_id="unit-credential", public_key=b"verified-synthetic-key",
+            sign_count=0, transports=[], backup_eligible=False, backup_state=False,
+        )
         with pytest.raises(ValueError, match="already used"):
-            identity.consume_enrollment_code(code)
+            identity.begin_enrollment(code, b"next-challenge")
 
     def test_expired_code_rejected(self, temp_db):
         _, _, identity = temp_db
@@ -124,7 +129,7 @@ class TestEnrollmentCode:
         conn.commit()
         conn.close()
         with pytest.raises(ValueError, match="expired"):
-            identity.consume_enrollment_code(code)
+            identity.begin_enrollment(code, b"unit-challenge")
 
 
 def hashlib_sha256(val: str) -> str:
@@ -294,3 +299,185 @@ class TestEnrollVerify:
         assert resp.status_code == 200
         # The options should be for user-matthew, not user-ana.
         assert resp.json()["user"]["name"] == "user-matthew"
+
+
+def _begin(client, code):
+    response = client.post(
+        "/api/auth/enroll/begin", json={"code": code}, headers={"Origin": TEST_ORIGIN}
+    )
+    assert response.status_code == 200, response.text
+    from tests.t05_support import b64url_decode
+
+    return b64url_decode(response.json()["challenge"])
+
+
+def _registration(challenge, *, rp_id=TEST_RP_ID):
+    credential = generate_credential()
+    return credential, create_registration_response(
+        credential, challenge=challenge, rp_id=rp_id, origin=TEST_ORIGIN,
+        user_id="user-matthew",
+    )
+
+
+def _verify(client, registration):
+    return client.post(
+        "/api/auth/enroll/verify", json={"credential": registration},
+        headers={"Origin": TEST_ORIGIN},
+    )
+
+
+def test_cancel_begin_again_success_and_siblings_replay_blocked(client, temp_db):
+    _, _, identity = temp_db
+    code = identity.create_enrollment_code("user-matthew")
+    cancelled = _begin(client, code)
+    active = _begin(client, code)
+    credential, registration = _registration(active)
+    assert _verify(client, registration).status_code == 200
+    assert identity.get_credential(credential.credential_id_b64) is not None
+    assert _verify(client, registration).status_code == 400
+    _, old_registration = _registration(cancelled)
+    assert _verify(client, old_registration).status_code == 400
+    assert client.post(
+        "/api/auth/enroll/begin", json={"code": code}, headers={"Origin": TEST_ORIGIN}
+    ).status_code == 400
+    assert len(identity.get_user_credentials("user-matthew")) == 1
+
+
+def test_failed_registration_does_not_consume_code(client, temp_db):
+    _, _, identity = temp_db
+    code = identity.create_enrollment_code("user-matthew")
+    first = _begin(client, code)
+    _, invalid = _registration(first, rp_id="evil.com")
+    assert _verify(client, invalid).status_code == 400
+    _, valid = _registration(_begin(client, code))
+    assert _verify(client, valid).status_code == 200
+
+
+def test_enrollment_begins_limited_persistently(client, temp_db):
+    db, _, identity = temp_db
+    code = identity.create_enrollment_code("user-matthew")
+    for _ in range(5):
+        _begin(client, code)
+    other_store = IdentityStore(db)
+    with pytest.raises(ValueError, match="begin limit"):
+        other_store.begin_enrollment(code, b"sixth-challenge")
+    assert client.post(
+        "/api/auth/enroll/begin", json={"code": code}, headers={"Origin": TEST_ORIGIN}
+    ).status_code == 400
+
+
+@pytest.mark.parametrize("table", ["enrollment_codes", "auth_challenges"])
+def test_expiry_after_begin_blocks_registration(client, temp_db, table):
+    db, _, identity = temp_db
+    code = identity.create_enrollment_code("user-matthew")
+    _, registration = _registration(_begin(client, code))
+    from ledger.schema import connect
+
+    conn = connect(db)
+    conn.execute(f"UPDATE {table} SET expires_at = '2000-01-01T00:00:00+00:00'")
+    conn.commit()
+    conn.close()
+    assert _verify(client, registration).status_code == 400
+    assert identity.get_user_credentials("user-matthew") == []
+
+
+@pytest.mark.parametrize("same_challenge", [False, True])
+def test_concurrent_registration_has_one_success(client, temp_db, same_challenge):
+    from concurrent.futures import ThreadPoolExecutor
+
+    _, _, identity = temp_db
+    code = identity.create_enrollment_code("user-matthew")
+    registrations = [_registration(_begin(client, code))[1] for _ in range(2)]
+    if same_challenge:
+        registrations[1] = registrations[0]
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        responses = list(pool.map(lambda r: _verify(client, r), registrations))
+    assert sorted(r.status_code for r in responses) == [200, 400]
+    assert len(identity.get_user_credentials("user-matthew")) == 1
+
+
+def test_failed_credential_insert_rolls_back_code_and_challenges(client, temp_db):
+    _, _, identity = temp_db
+    code = identity.create_enrollment_code("user-matthew")
+    first = _begin(client, code)
+    second = _begin(client, code)
+    credential, registration = _registration(first)
+    identity.store_credential(
+        credential_id=credential.credential_id_b64, user_id="user-matthew",
+        public_key=b"existing", sign_count=0, transports=[], backup_eligible=False,
+        backup_state=False,
+    )
+    assert _verify(client, registration).status_code == 400
+    _, valid = _registration(second)
+    assert _verify(client, valid).status_code == 200
+
+
+def test_unbound_legacy_registration_challenge_cannot_enroll(client, temp_db):
+    _, _, identity = temp_db
+    challenge = b"unbound-registration-challenge"
+    identity.store_challenge(challenge, purpose="registration", user_id="user-matthew")
+    _, registration = _registration(challenge)
+    assert _verify(client, registration).status_code == 400
+    assert not identity.get_user_credentials("user-matthew")
+
+
+def test_challenge_expiry_never_extends_code_expiry(client, temp_db, monkeypatch):
+    from datetime import timedelta
+
+    from ledger.schema import connect
+    from shared.timeutil import from_iso
+
+    db, _, identity = temp_db
+    code = identity.create_enrollment_code("user-matthew")
+    conn = connect(db)
+    expires = from_iso(conn.execute(
+        "SELECT expires_at FROM enrollment_codes WHERE code_hash = ?", (hashlib_sha256(code),)
+    ).fetchone()[0])
+    monkeypatch.setattr("gateway.identity.now_utc", lambda: expires - timedelta(seconds=5))
+    _begin(client, code)
+    challenge_expiry = from_iso(conn.execute(
+        "SELECT expires_at FROM auth_challenges WHERE purpose = 'registration'"
+    ).fetchone()[0])
+    assert challenge_expiry == expires
+    monkeypatch.setattr("gateway.identity.now_utc", lambda: expires)
+    response = client.post(
+        "/api/auth/enroll/begin", json={"code": code}, headers={"Origin": TEST_ORIGIN}
+    )
+    assert response.status_code == 400
+    conn.close()
+
+
+def test_success_consumes_only_bound_code(client, temp_db):
+    _, _, identity = temp_db
+    first = identity.create_enrollment_code("user-matthew")
+    second = identity.create_enrollment_code("user-matthew")
+    _, registration_a = _registration(_begin(client, first))
+    _, registration_b = _registration(_begin(client, second))
+    assert _verify(client, registration_a).status_code == 200
+    assert _verify(client, registration_b).status_code == 200
+
+
+def test_additive_upgrade_preserves_identity_and_existing_state(temp_db):
+    from ledger.schema import connect
+    from ledger.seed import upgrade_db
+
+    db, _, identity = temp_db
+    identity.create_enrollment_code("user-matthew")
+    identity.create_session("user-matthew")
+    identity.store_credential(
+        credential_id="preserved-credential", user_id="user-matthew", public_key=b"preserved",
+        sign_count=7, transports=[], backup_eligible=False, backup_state=False,
+    )
+    conn = connect(db)
+    tables = ["users", "accounts", "webauthn_credentials", "enrollment_codes", "user_sessions"]
+    before = {table: [tuple(r) for r in conn.execute(f"SELECT * FROM {table}")] for table in tables}
+    conn.execute("DROP TABLE enrollment_challenges")
+    conn.execute("DROP TABLE draft_calculations")
+    conn.commit()
+    upgrade_db(conn)
+    upgrade_db(conn)
+    for table in tables:
+        assert [tuple(r) for r in conn.execute(f"SELECT * FROM {table}")] == before[table]
+    assert conn.execute("SELECT COUNT(*) FROM enrollment_challenges").fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM draft_calculations").fetchone()[0] == 0
+    conn.close()

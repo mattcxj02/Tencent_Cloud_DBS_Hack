@@ -134,7 +134,11 @@ class TestAccounts:
 class TestPayeeSearch:
     @pytest.mark.parametrize("q", ["%", "_", "%%", "j_hn"])
     def test_like_wildcards_match_literally(self, matthew_token: str, q: str) -> None:
-        """SQL LIKE wildcards in the query must not match every payee."""
+        """Wildcard characters are literal: they never match a payee exactly.
+
+        "j_hn" may still come back as a near-spelling suggestion of John (``match:
+        "fuzzy"``), which the agent can only offer as a question.
+        """
         client = TestClient(app)
         resp = client.get(
             "/internal/bank/payees/search",
@@ -142,7 +146,8 @@ class TestPayeeSearch:
             params={"q": q},
         )
         assert resp.status_code == 200
-        assert resp.json() == []
+        assert [p for p in resp.json() if p["match"] == "exact"] == []
+        assert all(p["display_name"].startswith("John") for p in resp.json())
 
     def test_search_john(self, matthew_token: str) -> None:
         """Search for 'john' returns both John Doe and John Tan."""

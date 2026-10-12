@@ -1,46 +1,36 @@
-"""Draft orchestration: run the agent, then the validator, for one conversation.
-
-``POST /api/conversations/{id}/draft`` (``orchestration_routes.py``) calls
-:func:`draft_conversation`. The gateway, not the browser, drives the fixed workflow:
-
-1. The conversation must belong to the session user (else ``CONVERSATION_NOT_FOUND``).
-2. The gateway issues a short-lived delegation token (``AGENT_TOKEN_TTL_SECONDS``) bound
-   to that user and conversation with exactly :data:`AGENT_SCOPES`, and calls the agent's
-   ``POST /internal/run`` with it and the current ``traceparent``.
-3. ``clarify``: the question is read back from the gateway's own stored ``app_question``
-   turn (the agent's copy of the text is not trusted).
-4. ``draft_frozen``: the reported bundle must be the user's ``DRAFT_FROZEN`` draft in this
-   conversation; the gateway then runs the semantic validation coordinator
-   (:func:`gateway.validation.validate_draft`) directly. The legs and totals in the
-   response come from the stored bundle bytes and bank records, never from the agent.
-5. A stale result (``STALE_CONVERSATION_REVISION``, a draft superseded by a newer turn, or
-   a validation stored ``SUPERSEDED``) re-runs the agent once.
-
-Every failure is a stable code (:class:`OrchestrationError`), mapped by the route to
-HTTP 404/502/503/504 with ``{"status": "error", "code": ...}``; nothing here returns a
-stack trace. A MATCH only makes the draft eligible for confirmation; signing, ownership
-and hard policy still decide. Time is bounded: each agent call by
-``AGENT_TIMEOUT_SECONDS``, the validator by its client timeout, the whole request by
-two agent runs + one validator call + ``BUDGET_SLACK_SECONDS`` (a retry or a second
-validation is refused with ``ORCHESTRATION_TIMEOUT`` when the budget cannot cover it).
-
-This module is imported only by gateway code.
-"""
+"""Owner/revision-scoped drafting with one deadline and reusable frozen validation input."""
 
 from __future__ import annotations
 
 import re
 import sqlite3
 import threading
-import time
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 import httpx
 
 from gateway.auth.delegation import get_delegation_issuer
+from gateway.drafting_work import DraftWork, admit, finish
+from gateway.readiness import drafting_problem
+from gateway.readiness import logger as readiness_logger
 from gateway.telemetry import stage
-from gateway.validation import ValidationRefused, _load_bundle, validate_draft
+from gateway.validation import (
+    ValidationRefused,
+    _load_bundle,
+    latest_result,
+    reusable_draft,
+    semantic_validation_passed,
+    validate_draft,
+)
 from ledger.schema import cents_to_money, connect, money_to_cents
+from shared.deadline import (
+    DEADLINE_HEADER,
+    Deadline,
+    DeadlineExpired,
+    bounded_call,
+    current_deadline,
+)
 from shared.schemas import FrozenBundle, Leg
 from shared.settings import load_gateway_settings
 from shared.telemetry import inject_trace_headers
@@ -49,7 +39,6 @@ __all__ = [
     "AGENT_SCOPES",
     "AGENT_TOKEN_TTL_SECONDS",
     "AGENT_TIMEOUT_SECONDS",
-    "BUDGET_SLACK_SECONDS",
     "OrchestrationError",
     "account_display",
     "draft_conversation",
@@ -80,9 +69,7 @@ def _agent_timeout() -> float:
         return AGENT_TIMEOUT_SECONDS
 
 
-#: Slack on top of the per-call bounds. One draft request may take at most two agent
-#: runs plus one validator call (VALIDATOR_CLIENT_TIMEOUT_SECONDS, default 40 s) plus this.
-BUDGET_SLACK_SECONDS = 5.0
+_AGENT_EXECUTOR = ThreadPoolExecutor(max_workers=8, thread_name_prefix="gateway-agent")
 
 _RUN_PATH = "/internal/run"
 _ROUTE = "/api/conversations/{conversation_id}/draft"
@@ -90,9 +77,13 @@ _CODE_RE = re.compile(r"^[A-Z][A-Z0-9_]{1,63}$")
 _UNAVAILABLE = frozenset(
     {
         "EXTRACTOR_UNAVAILABLE",
+        "EXTRACTOR_NOT_CONFIGURED",
         "GATEWAY_UNAVAILABLE",
         "VALIDATOR_UNAVAILABLE",
         "SERVICE_TOKEN_UNSET",
+        "VALIDATOR_AUTH_FAILED",
+        "SERVICE_CONFIGURATION_INVALID",
+        "DRAFTING_UNAVAILABLE",
         "LLM_NOT_CONFIGURED",
         "LLM_PROVIDER_ERROR",
         "VALIDATION_RATE_LIMITED",
@@ -157,24 +148,43 @@ def _set_agent_http(client: httpx.Client | None) -> None:
         _agent_http = client
 
 
-def _call_agent(user_id: str, conversation_id: str, attempt: int) -> dict[str, Any]:
+def _call_agent(work: DraftWork, attempt: int) -> dict[str, Any]:
     """One agent run with a fresh, narrowly scoped token. Returns the parsed outcome."""
     token = get_delegation_issuer().issue_token(
-        user_id,
+        work.user_id,
         list(AGENT_SCOPES),
-        conversation_id=conversation_id,
+        conversation_id=work.conversation_id,
+        run_id=work.run_id,
         ttl_seconds=AGENT_TOKEN_TTL_SECONDS,
     )
+    conversation_id = work.conversation_id
+    budget = work.budget.child(_agent_timeout())
     with stage(
         "agent.call",
         attributes={"conversation_id": conversation_id, "attempt": attempt, "route": _RUN_PATH},
     ) as span:
         # traceparent of this span: the agent continues the same trace.
-        headers = inject_trace_headers({"Authorization": f"Bearer {token}"})
+        headers = inject_trace_headers(
+            {"Authorization": f"Bearer {token}", DEADLINE_HEADER: budget.header()}
+        )
         try:
-            response = get_agent_http().post(
-                _RUN_PATH, json={"conversation_id": conversation_id}, headers=headers
-            )
+
+            def call() -> httpx.Response:
+                work.check()
+                return get_agent_http().post(
+                    _RUN_PATH,
+                    json={"conversation_id": conversation_id},
+                    headers=headers,
+                    timeout=budget.remaining(),
+                )
+
+            response = bounded_call(_AGENT_EXECUTOR, budget, call)
+            work.check()
+        except DeadlineExpired:
+            if work.superseded or work.budget.cancelled.is_set():
+                raise
+            span.set_status("timeout", reason_code="AGENT_TIMEOUT")
+            raise OrchestrationError("AGENT_TIMEOUT", 504) from None
         except httpx.TimeoutException:
             span.set_status("timeout", reason_code="AGENT_TIMEOUT")
             raise OrchestrationError("AGENT_TIMEOUT", 504) from None
@@ -267,7 +277,13 @@ def _question(conn: sqlite3.Connection, conversation_id: str, outcome: dict) -> 
     ).fetchone()
     if row is None or row["role"] != "app_question":
         raise OrchestrationError("AGENT_BAD_RESPONSE", 502)
-    return {"turn_id": row["turn_id"], "text": row["text"]}
+    from gateway.clarifications import public_question, question
+
+    stored = question(conn, conversation_id, row["turn_id"])
+    result = {"turn_id": row["turn_id"], "text": row["text"]}
+    if stored is not None:
+        result["clarification"] = public_question(stored)
+    return result
 
 
 def _frozen_draft(
@@ -302,6 +318,10 @@ def _bundle_response(
             bundle = _load_bundle(row)
         except ValidationRefused as exc:
             raise OrchestrationError(exc.code, 502) from None
+        if validation.get("next_action") == "CONFIRM" and not semantic_validation_passed(
+            conn, bundle
+        ):
+            raise OrchestrationError("VALIDATION_NOT_ELIGIBLE", 503)
         legs = leg_views(conn, user_id, bundle)
     finally:
         conn.close()
@@ -330,7 +350,7 @@ def _bundle_response(
 
 
 def _validate(user_id: str, bundle_id: str) -> dict[str, Any] | None:
-    """The validation view, or None when the draft went stale (redraft once)."""
+    """The validation view, or None when this request's draft went stale."""
     try:
         view = validate_draft(user_id, bundle_id)
     except ValidationRefused as exc:
@@ -344,41 +364,65 @@ def _validate(user_id: str, bundle_id: str) -> dict[str, Any] | None:
             raise OrchestrationError(
                 exc.code, _http_for(exc.code), retry_after=exc.extra.get("retry_after_seconds")
             ) from None
+    if view.get("state") == "SUPERSEDED" and "TIMEOUT" in (view.get("code") or ""):
+        raise OrchestrationError(view["code"], 504)
     return None if view.get("state") == "SUPERSEDED" else view
 
 
-def _run(user_id: str, conversation_id: str, db_path: str, deadline: float) -> dict[str, Any]:
-    for attempt in (1, 2):
-        if attempt == 2 and deadline - time.monotonic() < _agent_timeout():
-            raise OrchestrationError("ORCHESTRATION_TIMEOUT", 504)
-        outcome = _call_agent(user_id, conversation_id, attempt)
+def _run(work: DraftWork, *, validation_only: bool = False) -> dict[str, Any]:
+    work.check()
+    conn = connect(work.db_path)
+    try:
+        bundle_id = reusable_draft(conn, work.user_id, work.conversation_id, work.revision)
+    except ValidationRefused as exc:
+        if exc.code == "VALIDATION_FINAL" and isinstance(exc.extra.get("result"), dict):
+            return _bundle_response(
+                work.db_path, work.user_id, exc.extra["result"]["bundle_id"], exc.extra["result"]
+            )
+        raise OrchestrationError(exc.code, _http_for(exc.code)) from None
+    finally:
+        conn.close()
+    if bundle_id is None:
+        if validation_only:
+            raise OrchestrationError("REDRAFT_REQUIRED", 409)
+        outcome = _call_agent(work, 1)
+        work.check()
         status = outcome["status"]
         if status == "error":
             code = _safe_code(outcome.get("code"), "AGENT_ERROR")
-            if code == "STALE_CONVERSATION_REVISION" and attempt == 1:
-                continue
             raise OrchestrationError(code, _http_for(code))
-        conn = connect(db_path)
+        conn = connect(work.db_path)
         try:
             if status == "clarify":
-                revision = _owned_conversation(conn, user_id, conversation_id)
                 return {
                     "status": "clarify",
-                    "question": _question(conn, conversation_id, outcome),
-                    "conversation_revision": revision,
+                    "question": _question(conn, work.conversation_id, outcome),
+                    "conversation_revision": work.revision,
                 }
-            draft, current = _frozen_draft(conn, user_id, conversation_id, outcome.get("bundle_id"))
+            draft, current = _frozen_draft(
+                conn, work.user_id, work.conversation_id, outcome.get("bundle_id")
+            )
+            if not current:
+                raise OrchestrationError("CONVERSATION_CHANGED", 503)
+            bundle_id = draft["bundle_id"]
         finally:
             conn.close()
-        if current:
-            # The validator call is bounded by its own client timeout; start it only if
-            # the request budget can still cover that.
-            if deadline - time.monotonic() < _validator_timeout():
-                raise OrchestrationError("ORCHESTRATION_TIMEOUT", 504)
-            view = _validate(user_id, draft["bundle_id"])
-            if view is not None:
-                return _bundle_response(db_path, user_id, draft["bundle_id"], view)
-    raise OrchestrationError("CONVERSATION_CHANGED", 503)
+    work.check()
+    work.progress.retry_validation = True
+    work.progress.update("validating")
+    budget = work.budget.child(_validator_timeout())
+    token = current_deadline.set(budget)
+    try:
+        view = _validate(work.user_id, bundle_id)
+    finally:
+        current_deadline.reset(token)
+    work.check()
+    if view is None:
+        raise OrchestrationError("CONVERSATION_CHANGED", 503)
+    # Re-read eligibility immediately before publishing instead of trusting the earlier view.
+    view = latest_result(work.user_id, bundle_id, db_path=work.db_path)
+    work.check()
+    return _bundle_response(work.db_path, work.user_id, bundle_id, view)
 
 
 def _validator_timeout() -> float:
@@ -394,21 +438,59 @@ def _db_path() -> str:
     return get_draft_store().db_path
 
 
-def draft_conversation(user_id: str, conversation_id: str) -> dict[str, Any]:
+def draft_conversation(
+    user_id: str,
+    conversation_id: str,
+    *,
+    cancelled: threading.Event | None = None,
+    budget: Deadline | None = None,
+    operation_id: str | None = None,
+    expected_revision: int | None = None,
+    validation_only: bool = False,
+) -> dict[str, Any]:
     """Run agent → validator for the user's conversation and return the UI view.
 
     Raises :class:`OrchestrationError` (stable code + HTTP status) for anything else.
     The ``gateway.draft`` span (fresh trace, session = conversation) closes before the
     response goes back to the person.
     """
+    try:
+        budget = budget or Deadline.after(load_gateway_settings().draft_timeout_seconds)
+    except Exception:  # noqa: BLE001 - configuration failures never start drafting
+        raise OrchestrationError("SERVICE_CONFIGURATION_INVALID", 503) from None
+    if cancelled is not None:
+        budget.cancelled = cancelled
+    try:
+        budget.remaining()
+    except DeadlineExpired:
+        raise OrchestrationError("ORCHESTRATION_TIMEOUT", 504) from None
     db_path = _db_path()
     conn = connect(db_path)
     try:
-        _owned_conversation(conn, user_id, conversation_id)  # 404 before tracing
+        revision = _owned_conversation(conn, user_id, conversation_id)  # 404 before tracing
     finally:
         conn.close()
-    budget = 2 * _agent_timeout() + _validator_timeout() + BUDGET_SLACK_SECONDS
-    deadline = time.monotonic() + budget
+    if expected_revision is not None and expected_revision != revision:
+        raise OrchestrationError("STALE_CONVERSATION_REVISION", 409)
+    work, leader = admit(
+        DraftWork(db_path, user_id, conversation_id, revision, budget), operation_id
+    )
+    if not leader:
+        if validation_only and not work.progress.retry_validation:
+            raise OrchestrationError("REDRAFT_REQUIRED", 409)
+        try:
+            while not work.done.wait(timeout=min(0.05, budget.remaining())):
+                budget.remaining()
+            if work.error is not None:
+                raise work.error
+            work.check()
+            assert work.result is not None
+            if "bundle_id" in work.result and work.result["status"] == "ready":
+                view = latest_result(user_id, work.result["bundle_id"], db_path=db_path)
+                return _bundle_response(db_path, user_id, work.result["bundle_id"], view)
+            return work.result
+        except DeadlineExpired:
+            raise OrchestrationError("ORCHESTRATION_TIMEOUT", 504) from None
     with stage(
         "gateway.draft",
         user_id=user_id,
@@ -416,10 +498,46 @@ def draft_conversation(user_id: str, conversation_id: str) -> dict[str, Any]:
         attributes={"conversation_id": conversation_id, "route": _ROUTE},
     ) as span:
         try:
-            result = _run(user_id, conversation_id, db_path, deadline)
+            work.check()
+            deadline_token = current_deadline.set(work.budget)
+            try:
+                problem = drafting_problem()
+            finally:
+                current_deadline.reset(deadline_token)
+            work.check()
+            if problem is not None:
+                readiness_logger.warning(
+                    "Drafting unavailable: %s; see README.md setup guidance", problem
+                )
+                raise OrchestrationError(problem, 503)
+            result = _run(work, validation_only=validation_only)
+            work.check()
+            work.result = result
+            work.progress.finish(result=result)
+        except DeadlineExpired:
+            code = (
+                "CONVERSATION_CHANGED"
+                if work.superseded
+                else "DRAFT_CANCELLED"
+                if cancelled is not None and cancelled.is_set()
+                else "ORCHESTRATION_TIMEOUT"
+            )
+            work.error = OrchestrationError(code, 504 if "TIMEOUT" in code else 503)
+            work.progress.finish(code=code)
+            work.audit_end(code)
+            raise work.error from None
         except OrchestrationError as exc:
+            work.error = exc
+            work.progress.finish(code=exc.code)
+            work.audit_end(exc.code)
             span.set_status(exc.telemetry_status, reason_code=exc.code)
             raise
+        except Exception as exc:
+            work.error = exc
+            work.progress.finish(code="DRAFT_FAILED")
+            raise
+        finally:
+            finish(work)
         span.set_attributes({"conversation_revision": result["conversation_revision"]})
         if result["status"] == "clarify":
             span.set_attributes({"turn_id": result["question"]["turn_id"]})

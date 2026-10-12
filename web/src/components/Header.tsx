@@ -9,6 +9,7 @@ import { useSession } from '../session'
 
 const NAV: { name: RouteName; label: string; auth: boolean }[] = [
   { name: 'chat', label: 'Chat', auth: true },
+  { name: 'payees', label: 'Payees', auth: true },
   { name: 'mandate', label: 'Mandate', auth: true },
   { name: 'evidence', label: 'Evidence', auth: true },
   { name: 'baseline', label: 'Baseline', auth: false },

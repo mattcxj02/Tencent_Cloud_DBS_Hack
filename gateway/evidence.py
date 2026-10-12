@@ -8,9 +8,11 @@ untrusted; this module checks them deterministically against gateway-held data:
   ``app_question``) and has not been replaced by a later transcript edit;
 - ``validate_span`` proves the quoted words sit at that location (location only), and
   the span must be whole words: "Mum" cut out of "Mumbai" is not a citation;
-- the target and source words must match the bank's own name, alias, account type
-  or masked suffix for exactly one of the user's records of that kind, so "John"
-  alone cannot select John Doe when John Tan also exists;
+- the target and source words must match the bank's own name, alias, the customer's
+  nickname, account type or masked suffix for exactly one of the user's records of
+  that kind, so "John" alone cannot select John Doe when John Tan also exists. Spacing
+  between whole words is ignored ("ahma" names "Ah Ma"); near spellings ("mom" for
+  "Mum") are never evidence, the agent asks the customer instead;
 - an amount whose words fall inside the leg's free-text reference is rejected, so
   a bill reference such as "INV 900" can never become the amount.
 
@@ -26,6 +28,7 @@ import sqlite3
 from dataclasses import dataclass
 from typing import Any
 
+from gateway.payees import payee_names
 from ledger.schema import money_to_cents
 from shared.amounts import (
     FractionAmount,
@@ -42,6 +45,7 @@ from shared.lineage import (
     validate_span,
 )
 from shared.money import Money
+from shared.names import mentions
 from shared.schemas import Lineage, SourceRef, TargetType
 
 __all__ = ["EvidenceError", "TurnIndex", "Span", "build_leg_lineage"]
@@ -80,6 +84,16 @@ class TurnIndex:
     """Gateway-held turns of one conversation, with superseded turns excluded."""
 
     def __init__(self, conn: sqlite3.Connection, conversation_id: str) -> None:
+        from gateway.clarifications import events
+
+        self._revision = int(
+            conn.execute(
+                "SELECT revision FROM conversations WHERE conversation_id = ?", (conversation_id,)
+            ).fetchone()["revision"]
+        )
+        self._selections = {
+            a["turn_id"]: a for a in events(conn, conversation_id, "gateway.clarification.answer")
+        }
         rows = conn.execute(
             "SELECT turn_id, role, text, edits_turn_id FROM conversation_turns "
             "WHERE conversation_id = ? ORDER BY seq",
@@ -110,6 +124,39 @@ class TurnIndex:
     def turn_text(self, turn_id: str) -> str:
         return self._turns[turn_id].text
 
+    def selection(
+        self, span: Span, leg_id: str, field: str, record_id: str, target_type: TargetType
+    ) -> bool:
+        answer = self._selections.get(span.turn_id)
+        if answer is None:
+            return False
+        if answer["revision"] != self._revision:
+            raise EvidenceError("SELECTION_REVISION_INVALID")
+        matches = [
+            s
+            for s in answer["selections"]
+            if (
+                s["span"]
+                == {
+                    "turn_id": span.turn_id,
+                    "start": span.start,
+                    "end": span.end,
+                    "text": span.text,
+                }
+                and s["leg_id"] == leg_id
+                and s["field"] == field
+                and s["record_id"] == record_id
+                and s["target_type"] == target_type.value
+            )
+        ]
+        if len(matches) != 1:
+            raise EvidenceError("SELECTION_BINDING_INVALID")
+        return True
+
+    def reject_selection_amount(self, span: Span) -> None:
+        if span.turn_id in self._selections:
+            raise EvidenceError("SELECTION_BINDING_INVALID")
+
     def user_said(self, phrase: str) -> bool:
         """True if *phrase* appears as whole words in a current user-originated turn."""
         needle = phrase.casefold()
@@ -137,9 +184,9 @@ def _normalize(text: str) -> str:
 
 
 def _mentions(span_text: str, names: tuple[str, ...]) -> bool:
-    """True if any name appears as a whole word or phrase in the span."""
-    haystack = f" {_normalize(span_text)} "
-    return any(name and f" {_normalize(name)} " in haystack for name in names)
+    """True if any name appears as whole words in the span (shared rule: case, punctuation
+    and the spacing between words are ignored, so "ahma" names "Ah Ma")."""
+    return mentions(span_text, names)
 
 
 Names = tuple[tuple[str, ...], tuple[str, ...]]
@@ -168,17 +215,13 @@ def _candidates(
             "WHERE owner_user_id = ? AND kind = ?",
             (user_id, kind),
         ).fetchall()
-        aliases: dict[str, list[str]] = {}
-        for a in conn.execute(
-            "SELECT alias, payee_id FROM payee_aliases WHERE owner_user_id = ?", (user_id,)
-        ):
-            aliases.setdefault(a["payee_id"], []).append(a["alias"])
+        names = payee_names(conn, user_id)  # bank aliases and customer nicknames
         return {
             r["payee_id"]: (
                 (
                     r["display_name"],
                     *((r["masked_suffix"],) if r["masked_suffix"] else ()),
-                    *aliases.get(r["payee_id"], []),
+                    *(names[r["payee_id"]].all if r["payee_id"] in names else ()),
                 ),
                 tuple(r["display_name"].split()),
             )
@@ -211,10 +254,20 @@ def _identify(
     record_id: str,
     span: Span,
     code: str,
+    leg_id: str,
+    field: str,
 ) -> list[SourceRef]:
     """The cited words must name this record and no other record of the same kind."""
     user_ref = turns.cite(span)
     candidates = _candidates(conn, user_id, target_type)
+    if turns.selection(span, leg_id, field, record_id, target_type):
+        if record_id not in candidates:
+            raise EvidenceError(code)
+        from gateway.clarifications import record_label
+
+        if record_label(conn, user_id, target_type, record_id) != span.text:
+            raise EvidenceError("SELECTION_RECORD_CHANGED")
+        return [user_ref, build_bank_record_ref(record_id)]
     # A full name, alias or suffix ("John Doe", "Mum", "4521") identifies a record even
     # if one of its words ("John") is shared; a shared word alone does not.
     matches = [rid for rid, (strong, _) in candidates.items() if _mentions(span.text, strong)]
@@ -283,6 +336,7 @@ def build_leg_lineage(
     except (KeyError, TypeError):
         raise EvidenceError("EVIDENCE_MISSING") from None
 
+    turns.reject_selection_amount(spans["amount"])
     amount_ref = turns.cite(spans["amount"])
     reference = (leg.get("reference") or "").strip()
     if reference:
@@ -305,6 +359,8 @@ def build_leg_lineage(
         leg["target_id"],
         spans["target"],
         "TARGET_EVIDENCE",
+        leg["leg_id"],
+        "target",
     )
     source_refs = _identify(
         conn,
@@ -314,6 +370,8 @@ def build_leg_lineage(
         leg["source_account_id"],
         spans["source"],
         "SOURCE_EVIDENCE",
+        leg["leg_id"],
+        "source",
     )
 
     if relative_parents is None:

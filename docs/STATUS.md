@@ -1,6 +1,6 @@
 # DCTA status and to-do
 
-Last updated: **11 Oct 2026** · Phase: **Build complete (T-00–T-14). Remaining: owner checks (browser, mic, usability), CodeBuddy screenshots, video, submission** · CodeBuddy credits exhausted · Days to submission target (15 Oct): **4** · Hard deadline: 16 Oct
+Last updated: **13 Oct 2026** · Phase: **Build complete (T-00–T-14) + improvement plan phases 1–6 merged. Remaining: owner checks (browser, mic, usability), CodeBuddy screenshots, video, submission** · CodeBuddy credits exhausted · Days to submission target (15 Oct): **2** · Hard deadline: 16 Oct
 
 Scope contract: full MVP in [PLAN.md](PLAN.md) v0.3. Task prompts and acceptance: [instructions.md](instructions.md). Update this file whenever a task changes state; mark a task `[x]` only when its acceptance checks have actually passed.
 
@@ -15,6 +15,20 @@ Status key: `[ ]` pending · `[~]` in progress · `[x]` done · `[!]` blocked
 | 23 Oct | Finalists announced |
 | 3 Nov | Demo Day (TBC) |
 
+## Improvement plan (12–13 Oct 2026)
+
+All six phases of [IMPROVEMENT_PLAN.md](IMPROVEMENT_PLAN.md) are implemented and merged into the working tree (not committed). Code by Codex CLI (`gpt-6.1-sol`) in separate git worktrees, one phase each; CodeBuddy started Phase 5 but ran out of credits before editing; the lead session reviewed every diff, fixed defects, merged and ran the checks. Backups: `refs/backup/pre-improvement`, `after-phase1`, `after-wave1`, `after-phase4`.
+
+- [x] **Phase 1 Readiness:** bounded non-model preflight (token, authenticated validator, agent config) before extraction; missing settings reported by name only; `make dev` cleans up its processes, scoped `make stop`; stale `make demo` removed. Extractor timeout 40 s, no SDK retries.
+- [x] **Phase 2 Faster extraction:** `EXTRACT_REASONING_EFFORT` (per provider/model; unset = old request). `no_think` alone failed the gate (obeyed a fake "app:" line, `adv-07`); extractor prompt **v2** adds one rule against that. Result: extractor **p50 2.0 s / p95 3.2 s** (was 10.6 / 27.4 s same day), 33–34/35 over three trials, 0 unsafe drafts ([T-14-no-think](evidence/T-14-no-think.md)). `mimo-v2.6-flash` probed and rejected (8–24 s).
+- [x] **Phase 3 Clarification:** grouped questions; gateway-generated choice IDs bound to question, field, leg and revision; a clicked answer updates the draft with no extra extractor call; free text falls back to extraction.
+- [x] **Phase 4 Deadlines and reuse:** one 90 s drafting deadline propagated to agent and provider; single-flight per owner+revision; late results never published; validation-only retry reuses an unchanged frozen draft.
+- [x] **Phase 5 Progress:** owner/revision-scoped progress endpoint polled about once a second (bounded); real stages and elapsed time; one automatic redraft when the conversation changed; approval recovery fetches an existing receipt first.
+- [x] **Phase 6 Evidence and enrollment:** frozen calculation evidence for derived amounts, bound into validation hashes; validator prompt **v2**; enrollment code consumed only on successful registration (begin → cancel → begin works), five begins per code. Validator false rejects **5/25 → 0/24**, wrong drafts accepted still **0** ([findings](evidence/phase6-validator-findings.md)).
+- [x] **Lead fix:** the validator accepted an Ah Ma → Mum swap 2/4 because it never saw that Ah Ma is a separate payee; bank metadata now lists every saved payee of the same kind (swap rejected 4/4).
+- [x] Checks on the merged tree (13 Oct): `make test` **1,359 passed**; ruff clean; `tsc` and `npm run build` pass; Rogue Agent Mode **46/46**; fake evaluation 35/35; live golden set 33/35, 0 unsafe; follow-up suite 6/6.
+- [ ] Not verified: browser fixture tests (`web/tests/`, need a browser), real-browser walkthrough of the new clarification/progress/enrollment UI, live Langfuse read-back, fresh container probe, complete voice-to-ready timing.
+
 ## Owner actions (not code; unblock T-00)
 
 - [x] TRTC application credentials in `.env` (`SDKAppID`, `SDKSecretKey`). Still check the free allowance in Package Management.
@@ -22,10 +36,13 @@ Status key: `[ ]` pending · `[~]` in progress · `[x]` done · `[!]` blocked
 - [ ] Optional: activate `deepseek-v4-flash` under TokenHub Online Inference Service if you want the validator on TokenHub too (then set `VALIDATE_PROVIDER=tokenhub`, `VALIDATE_MODEL=deepseek-v4-flash`)
 - [x] DeepSeek key in `.env` (`deepseek_key`); validator uses `deepseek-flash` directly
 - [x] Langfuse Cloud keys in `.env` (`LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_BASE_URL`)
-- [!] **CodeBuddy credits exhausted (429) on 10 Oct and will not reset.** Decision: remaining tasks are built by Claude subagents and reviewed by the lead. The submission still asks for ≥3 CodeBuddy/WorkBuddy development screenshots (0 so far): plan how to show the CodeBuddy-built T-00–T-05 work (CLI session logs are kept)
+- [!] **CodeBuddy credits exhausted (429) on 10 Oct.** Briefly available again on 13 Oct: a Phase 5 session (`01a130da-a414-7dda-ad70-6e589db2854a`) read the plan, made a task list and started sub-agents before hitting 429 again. The submission still asks for ≥3 CodeBuddy/WorkBuddy screenshots (0 so far): capture saved sessions from `codebuddy --serve --open`
 - [ ] Real-browser passkey check: `make seed`, `make enroll-code`, `make dev`, `cd web && npm run dev`, open http://localhost:5173, enroll with the code, sign in (Touch ID)
 - [ ] For the step-up demo add `OPERATOR_TOKEN=<random ≥32 chars>` and `STEP_UP_SECRET=<random ≥32 chars>` to `.env`
-- [ ] Add `VALIDATOR_SERVICE_TOKEN=<random ≥32 chars>` to `.env` (`python -c 'import secrets; print(secrets.token_urlsafe(48))'`); the validator refuses all requests without it
+- [ ] Configure the same `VALIDATOR_SERVICE_TOKEN=<random ≥32 chars>` in gateway and validator (never agent), restart both and check `/api/ready`; absent/short/mismatched tokens now fail before extraction
+- [x] `EXTRACT_REASONING_EFFORT=no_think` set in `.env` (13 Oct)
+- [ ] Run `make upgrade-db` on the real database before restarting (Phase 6 tables; keeps passkeys and history), then restart all services
+- [ ] Real-browser check of the new UI: clarification choice buttons, progress stages, enrollment cancel → retry, voice correction while drafting; run the browser fixtures in `web/tests/README.md`
 - [x] Credentials entered by the user (Claude/CodeBuddy never read or edit `.env`; `.env.example` mirrors these names)
 - [x] Start Docker Desktop (running; T-04 Compose + isolation probes pass)
 - [ ] Run ~5 usability sessions with `evals/usability/protocol.md` (baseline page `#/baseline` vs chat); enter results in `results_template.csv`
@@ -60,10 +77,10 @@ Status key: `[ ]` pending · `[~]` in progress · `[x]` done · `[!]` blocked
 
 ## Submission evidence checklist
 
-- [ ] CodeBuddy/WorkBuddy development screenshots or recordings: **0 / 3 minimum** (T-00/T-01 ran headless; CLI logs kept as supplementary evidence only)
+- [ ] CodeBuddy/WorkBuddy development screenshots or recordings: **0 / 3 minimum** (sessions ran headless; capture them from `codebuddy --serve --open`; CLI logs kept as supplementary evidence)
 - [ ] Real Langfuse trace link (extraction → validation → policy → execution)
 - [ ] Langfuse dataset + extractor-only vs extractor+validator experiment runs
-- [ ] Attack matrix (attack, expected control, observed result)
+- [x] Attack matrix (attack, expected control, observed result): 46/46, rerun 13 Oct
 - [x] Isolation probe output from containers (T-04: 26/26 PASS agent + validator; see [evidence](evidence/T-04-isolation.txt))
 - [ ] Usability comparison notes (about 5 testers)
 - [ ] Title, blurb under 10 words, description, 16:9 cover
@@ -76,7 +93,7 @@ Status key: `[ ]` pending · `[~]` in progress · `[x]` done · `[!]` blocked
 |---|---|---|
 | Full scope needs more hours than the ~21–28 left | Open | Track hours below; if the 10 Oct transfer milestone slips, raise it with the user immediately. Scope changes are the user's call. |
 | Live credentials not yet supplied | Open | Owner actions above; smokes record "missing credential" rather than passing |
-| hy3 is a reasoning model (~3 s, ~250 tokens per small call) | Open | max_tokens ≥ 2048; never pass its reasoning to the validator or Langfuse unsanitized; watch extractor latency in T-14 |
+| hy3 is a reasoning model (~9–11 s median with reasoning on) | Mitigated | `EXTRACT_REASONING_EFFORT=no_think` + extractor prompt v2: p50 ~2 s, 0 unsafe drafts over three trials. If unset, the old slow behaviour returns |
 | WebAuthn on phone needs an HTTPS origin | Accepted | Record the demo on the laptop (localhost); a hosted deploy needs re-enrollment |
 | ASR accuracy on Singapore names and aliases ("Ah Ma") | Open | Editable transcript; include such clips in the T-14 voice samples |
 
@@ -94,6 +111,8 @@ Status key: `[ ]` pending · `[~]` in progress · `[x]` done · `[!]` blocked
 | 10 Oct | Agent proposals must cite the user's words for amount, recipient and source; the gateway verifies location and that the words name exactly one bank record (`gateway/evidence.py`). Ambiguous names ("John") are rejected until the user disambiguates |
 | 10 Oct | Every project folder has a README.md describing its purpose; tasks keep them current (rule in CODEBUDDY.md) |
 | 9 Oct | `trtc-asr` installed from GitHub tag v2.0.0 (not on PyPI). Langfuse SDK 4.17; reads use v2 observations API (legacy API 410 for this org) |
+| 12 Oct | Improvement plan phases 1–6: implemented by Codex CLI in per-phase git worktrees, merged and reviewed by the lead; Phase 5 attempted in CodeBuddy first (out of credits) |
+| 12 Oct | Extractor default request stays unchanged when `EXTRACT_REASONING_EFFORT` is unset; operator sets `no_think` in `.env`. Extractor prompt v2 and validator prompt v2 adopted after live evaluation |
 | 10 Oct | T-04: Compose with two bridge networks (agent_net, validator_net); neither marked `internal` so both have outbound LLM egress. Agent/validator read-only rootfs + tmpfs /tmp; gateway has /data volume only. Images built from `uv sync --frozen --no-dev` with venv at `/app/.venv` so shebangs match runtime path |
 
 ## Hours log

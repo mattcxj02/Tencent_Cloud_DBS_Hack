@@ -46,6 +46,7 @@ import sqlite3
 import threading
 import uuid
 from collections.abc import Iterable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
@@ -54,8 +55,10 @@ import httpx
 from pydantic import ValidationError as PydanticValidationError
 
 from gateway.audit import REVISION_BOUND_TABLES, append_audit
+from gateway.calculations import bound_calculations
 from gateway.clock import utcnow
 from gateway.conversations import compute_conversation_hash
+from gateway.payees import payee_names
 from ledger.schema import cents_to_money, connect
 from shared.canonical import bundle_hash, canonical_bytes
 from shared.clients.validator import (
@@ -73,6 +76,7 @@ from shared.clients.validator import (
     ValidatorClient,
     validation_input_hash,
 )
+from shared.deadline import DeadlineExpired, bounded_call, check_deadline, current_deadline
 from shared.schemas import FrozenBundle, TargetType
 from shared.settings import load_gateway_settings
 from shared.telemetry import Telemetry, httpx_request_hook
@@ -125,8 +129,14 @@ _NON_RETRYABLE = frozenset(
         "BINDING_MISMATCH",
         "BANK_METADATA_INCOMPLETE",
         "INVALID_REQUEST",
+        "SERVICE_TOKEN_UNSET",
+        "UNAUTHORIZED",
+        "LLM_NOT_CONFIGURED",
+        "LLM_CONFIGURATION_ERROR",
     }
 )
+
+_VALIDATOR_EXECUTOR = ThreadPoolExecutor(max_workers=8, thread_name_prefix="gateway-validator")
 
 _PENDING, _CURRENT, _SUPERSEDED = "PENDING", "CURRENT", "SUPERSEDED"
 _ROUTE = "/api/drafts/{bundle_id}/validate"
@@ -270,11 +280,9 @@ def _payee_kind(target_type: TargetType) -> str:
 
 
 def _aliases(conn: sqlite3.Connection, user_id: str, payee_id: str) -> list[str]:
-    rows = conn.execute(
-        "SELECT alias FROM payee_aliases WHERE payee_id = ? AND owner_user_id = ? ORDER BY alias",
-        (payee_id, user_id),
-    ).fetchall()
-    return [r["alias"] for r in rows]
+    """Bank aliases, then the customer's nicknames ("also called …" in the label)."""
+    names = payee_names(conn, user_id).get(payee_id)
+    return names.all if names is not None else []
 
 
 def _target_label(
@@ -343,8 +351,8 @@ def _name_tokens(*names: str) -> set[str]:
 def _ambiguity_candidates(
     conn: sqlite3.Connection, user_id: str, target_type: TargetType, target_id: str
 ) -> list[tuple[str, str]]:
-    """Other records of the same kind that share a name token with the leg's target
-    (e.g. both saved Johns), so the validator can see an ambiguity. Sorted by ID."""
+    """Other records the validator must see to judge the target: every other saved
+    payee of the same kind, and billers/cards sharing a name token. Sorted by ID."""
     out: list[tuple[str, str]] = []
     if target_type in (TargetType.saved_payee, TargetType.saved_paynow):
         rows = conn.execute(
@@ -355,10 +363,10 @@ def _ambiguity_candidates(
         names = {r["payee_id"]: (r, _aliases(conn, user_id, r["payee_id"])) for r in rows}
         if target_id not in names:
             return out
-        target_row, target_aliases = names[target_id]
-        wanted = _name_tokens(target_row["display_name"], *target_aliases)
+        # Every other saved payee of the same kind, not only token-sharing ones: without
+        # Ah Ma listed, the validator matched "Ah Ma" to Mum's alias "Mama" (12 Oct eval).
         for payee_id, (row, aliases) in names.items():
-            if payee_id != target_id and wanted & _name_tokens(row["display_name"], *aliases):
+            if payee_id != target_id:
                 out.append((payee_id, _payee_label(row, aliases)))
     elif target_type == TargetType.biller:
         rows = conn.execute(
@@ -390,7 +398,8 @@ def build_bank_metadata(
     conn: sqlite3.Connection, user_id: str, bundle: FrozenBundle
 ) -> BankMetadata:
     """Gateway-resolved labels: every operable account of the user (leg sources first),
-    every leg target, then same-kind candidates sharing a name token with a target.
+    every leg target, then same-kind candidates (all other saved payees; billers and
+    cards sharing a name token).
 
     Deterministic for a given database state, so the eligibility check can rebuild it
     and detect changed bank terms. Raises :class:`_MetadataUnavailable` when a leg's
@@ -520,7 +529,8 @@ def _passes(conn: sqlite3.Connection, bundle: Any) -> bool:
     bundle_id = str(bundle.bundle_id)
     rows = conn.execute(
         "SELECT owner_user_id, bundle_hash, conversation_id, conversation_revision, "
-        "conversation_hash, bank_metadata_hash, status, verdict FROM validation_results "
+        "conversation_hash, bank_metadata_hash, input_hash, request_json, status, verdict "
+        "FROM validation_results "
         "WHERE bundle_id = ? AND state = 'CURRENT'",
         (bundle_id,),
     ).fetchall()
@@ -554,7 +564,21 @@ def _passes(conn: sqlite3.Connection, bundle: Any) -> bool:
     )
     if not bound:
         return False
-    return _metadata_hash(build_bank_metadata(conn, owner, bundle)) == result["bank_metadata_hash"]
+    metadata = build_bank_metadata(conn, owner, bundle)
+    stored = ValidationRequest.model_validate_json(result["request_json"])
+    rebuilt = ValidationRequest(
+        request_id=stored.request_id,
+        conversation=bound_conversation(
+            conn, bundle.conversation_id, revision, bundle.conversation_hash
+        ),
+        bundle=bundle,
+        bank_metadata=metadata,
+        calculation_evidence=bound_calculations(conn, bundle),
+    )
+    return (
+        _metadata_hash(metadata) == result["bank_metadata_hash"]
+        and validation_input_hash(rebuilt) == result["input_hash"]
+    )
 
 
 # ── Coordinator ─────────────────────────────────────────────────────
@@ -656,7 +680,15 @@ def _prepare_locked(
     if bundle.conversation_hash != conv["conversation_hash"]:
         raise ValidationRefused("CONVERSATION_INTEGRITY", 409, conversation_id=conv_id)
 
+    check_deadline()
     rows = _results(conn, bundle_id)
+    if rows and rows[-1]["status"] == "ERROR" and rows[-1]["code"] in _NON_RETRYABLE:
+        raise ValidationRefused(
+            "VALIDATION_FINAL",
+            409,
+            conversation_id=conv_id,
+            result=_view(conn, rows[-1], user_id),
+        )
     current = next((r for r in rows if r["state"] == _CURRENT), None)
     if current is not None and current["status"] == "OK":
         if current["verdict"] != "MATCH":  # MISMATCH/UNCERTAIN are not re-rolled
@@ -711,7 +743,11 @@ def _prepare_locked(
         snapshot = bound_conversation(conn, conv_id, revision, conv["conversation_hash"])
         metadata = build_bank_metadata(conn, user_id, bundle)
         request = ValidationRequest(
-            request_id=result_id, conversation=snapshot, bundle=bundle, bank_metadata=metadata
+            request_id=result_id,
+            conversation=snapshot,
+            bundle=bundle,
+            bank_metadata=metadata,
+            calculation_evidence=bound_calculations(conn, bundle),
         )
     except _MetadataUnavailable:
         raise ValidationRefused("BANK_METADATA_UNAVAILABLE", 409, conversation_id=conv_id) from None
@@ -719,6 +755,8 @@ def _prepare_locked(
         raise ValidationRefused(
             "VALIDATION_REQUEST_INVALID", 409, conversation_id=conv_id
         ) from None
+    except ValueError as exc:
+        raise ValidationRefused(str(exc), 409, conversation_id=conv_id) from None
     input_hash = validation_input_hash(request)
     attempt = len(rows) + 1
     conn.execute(
@@ -803,7 +841,14 @@ def _prepare(
 def _call_validator(client: ValidatorClient, request: ValidationRequest, input_hash: str):
     """One validator call. Never raises; never turns a failure into a MATCH."""
     try:
-        result = client.validate(request)
+        budget = current_deadline.get()
+
+        def call() -> ValidationResult:
+            return client.validate(request)
+
+        result = bounded_call(_VALIDATOR_EXECUTOR, budget, call) if budget is not None else call()
+    except DeadlineExpired:
+        return ValidationResult(status="ERROR", code="VALIDATOR_TIMEOUT", input_hash=input_hash)
     except Exception:  # noqa: BLE001 - the client should not raise; fail closed if it does
         return ValidationResult(status="ERROR", code="VALIDATOR_UNAVAILABLE", input_hash=input_hash)
     if not isinstance(result, ValidationResult):
@@ -844,8 +889,10 @@ def _finalize(
         draft = conn.execute(
             "SELECT status, bundle_hash FROM frozen_drafts WHERE bundle_id = ?", (bundle_id,)
         ).fetchone()
+        budget = current_deadline.get()
         still_bound = (
-            row["state"] == _PENDING
+            (budget is None or budget.active())
+            and row["state"] == _PENDING
             and conv is not None
             and int(conv["revision"]) == request.conversation.revision
             and conv["conversation_hash"] == request.conversation.conversation_hash
@@ -853,6 +900,17 @@ def _finalize(
             and draft["status"] == "DRAFT_FROZEN"
             and draft["bundle_hash"] == prepared.bundle_hash
         )
+        if still_bound:
+            try:
+                refreshed = request.model_copy(
+                    update={
+                        "bank_metadata": build_bank_metadata(conn, user_id, prepared.bundle),
+                        "calculation_evidence": bound_calculations(conn, prepared.bundle),
+                    }
+                )
+                still_bound = validation_input_hash(refreshed) == prepared.input_hash
+            except (ValueError, _MetadataUnavailable):
+                still_bound = False
         state = _CURRENT if still_bound else _SUPERSEDED
         if state == _CURRENT:
             conn.execute(
@@ -930,6 +988,96 @@ def _finalize(
         conn.close()
 
 
+def reusable_draft(
+    conn: sqlite3.Connection, user_id: str, conversation_id: str, revision: int
+) -> str | None:
+    """Return only unchanged frozen work; final errors are surfaced, never re-rolled."""
+    draft = conn.execute(
+        "SELECT * FROM frozen_drafts WHERE owner_user_id = ? AND conversation_id = ? "
+        "AND conversation_revision = ? ORDER BY created_at DESC LIMIT 1",
+        (user_id, conversation_id, revision),
+    ).fetchone()
+    if draft is None or draft["status"] not in ("DRAFT_FROZEN", MISMATCH_DRAFT_STATUS):
+        return None
+    rows = _results(conn, draft["bundle_id"])
+    if not rows:
+        return None
+    previous = rows[-1]
+    if previous["status"] == "ERROR" and previous["code"] in _NON_RETRYABLE:
+        raise ValidationRefused(previous["code"], 503, conversation_id=conversation_id)
+    if previous["status"] == "OK" and previous["verdict"] in ("MISMATCH", "UNCERTAIN"):
+        raise ValidationRefused(
+            "VALIDATION_FINAL",
+            409,
+            conversation_id=conversation_id,
+            result=_view(conn, previous, user_id),
+        )
+    try:
+        bundle = _load_bundle(draft)
+        conv = conn.execute(
+            "SELECT conversation_hash FROM conversations WHERE conversation_id = ?",
+            (conversation_id,),
+        ).fetchone()
+        if conv is None or conv["conversation_hash"] != bundle.conversation_hash:
+            return None
+        frozen_audit = conn.execute(
+            "SELECT payload_json FROM audit_events WHERE conversation_id = ? "
+            "AND step = 'gateway.draft.freeze' ORDER BY seq DESC",
+            (conversation_id,),
+        ).fetchall()
+        binding = next(
+            (
+                json.loads(r["payload_json"])
+                for r in frozen_audit
+                if json.loads(r["payload_json"]).get("bundle_id") == draft["bundle_id"]
+            ),
+            {},
+        )
+        mandate = conn.execute(
+            "SELECT version FROM mandates WHERE user_id = ? AND status IN ('active', 'paused') "
+            "ORDER BY version DESC LIMIT 1",
+            (user_id,),
+        ).fetchone()
+        if "mandate_version" not in binding or binding["mandate_version"] != (
+            mandate["version"] if mandate is not None else None
+        ):
+            return None
+        for leg in bundle.legs:
+            terms = leg.equity_terms
+            if terms is None:
+                continue
+            quote = conn.execute(
+                "SELECT * FROM equity_quotes WHERE quote_id = ?", (terms.quote_id,)
+            ).fetchone()
+            if quote is None or from_iso(terms.quote_expires_at) <= utcnow():
+                return None
+            if (
+                quote["symbol"] != leg.target_id
+                or quote["expires_at"] != terms.quote_expires_at
+                or quote["quoted_at"] != terms.quoted_at
+                or cents_to_money(quote["unit_price_cents"]) != terms.unit_price
+            ):
+                return None
+        old = ValidationRequest.model_validate_json(previous["request_json"])
+        refreshed = old.model_copy(
+            update={
+                "bundle": bundle,
+                "conversation": bound_conversation(
+                    conn, conversation_id, revision, bundle.conversation_hash
+                ),
+                "bank_metadata": build_bank_metadata(conn, user_id, bundle),
+                "calculation_evidence": bound_calculations(conn, bundle),
+            }
+        )
+        if validation_input_hash(refreshed) != previous["input_hash"]:
+            return None
+        if previous["status"] == "OK" and not semantic_validation_passed(conn, bundle):
+            return None
+        return draft["bundle_id"]
+    except (ValueError, _MetadataUnavailable, ValidationRefused, PydanticValidationError):
+        return None
+
+
 def _span_outcome(view: dict[str, Any]) -> tuple[str, str | None]:
     if view.get("state") == _SUPERSEDED:
         return "superseded", "CONVERSATION_CHANGED"
@@ -976,6 +1124,7 @@ def validate_draft(
         attributes={"bundle_id": bundle_id, "conversation_id": conversation_id, "route": _ROUTE},
     ) as span:
         trace = (span.trace_id, span.observation_id)
+        check_deadline()
         try:
             prepared = _prepare(db_path, user_id, bundle_id, trace)
         except ValidationRefused as refused:

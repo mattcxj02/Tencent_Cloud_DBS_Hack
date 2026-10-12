@@ -679,7 +679,8 @@ def test_audit_events_are_agent_steps_with_small_payloads() -> None:
     for event in gw.events:
         blob = json.dumps(event)
         assert len(blob) < 2000
-        assert "reasoning" not in blob
+        # Configuration labels such as reasoning_effort are fine; reasoning text is not.
+        assert "reasoning_content" not in blob
         assert "Bearer" not in blob
 
 

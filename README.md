@@ -37,7 +37,7 @@ There are three services, each with its own container image ([infra/](infra/READ
 ## Quick start (local demo)
 
 **Prerequisites**
-- A Mac with Touch ID or another platform passkey, and Chrome or Safari. Passkeys work on `http://localhost`; a phone needs an HTTPS origin.
+- A device with a platform passkey: a Mac with Touch ID (Chrome or Safari) or a Windows 10/11 PC with Windows Hello (Chrome or Edge); a USB security key also works. Passkeys work on `http://localhost` in a real browser (not an editor's built-in preview); a phone needs an HTTPS origin.
 - Python 3.12, [uv](https://docs.astral.sh/uv/), Node.js (current LTS) with npm, and Docker Desktop (for the container stack only).
 - Credentials: a TokenHub key with `hy3` enabled, a DeepSeek API key, a Tencent TRTC application (**SDKAppID + SDKSecretKey**, not the cloud SecretId/SecretKey) and a Langfuse Cloud project.
 
@@ -52,7 +52,7 @@ cd web && npm install && cd ..
 
 | Purpose | Variables |
 |---|---|
-| Models | `tokenhub_key`, `deepseek_key`. Optional: `EXTRACT_PROVIDER`, `EXTRACT_MODEL`, `VALIDATE_PROVIDER`, `VALIDATE_MODEL`, `EXTRACT_MAX_TOKENS`, `VALIDATE_MAX_TOKENS`, `AGENT_TIMEOUT_SECONDS` |
+| Models | `tokenhub_key`, `deepseek_key`. Optional: `EXTRACT_PROVIDER`, `EXTRACT_MODEL`, `VALIDATE_PROVIDER`, `VALIDATE_MODEL`, `EXTRACT_MAX_TOKENS`, `VALIDATE_MAX_TOKENS`, `EXTRACT_TIMEOUT_SECONDS`, `EXTRACT_MAX_RETRIES`, `AGENT_TIMEOUT_SECONDS`, `VALIDATE_TIMEOUT_SECONDS`, `VALIDATOR_CLIENT_TIMEOUT_SECONDS` |
 | Voice (gateway only) | `SDKAppID`, `SDKSecretKey`, `TRTC_ASR_HOST` |
 | Observability | `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_BASE_URL` |
 | Service secrets (random, at least 32 characters each) | `VALIDATOR_SERVICE_TOKEN` (**required**: the validator refuses every request without it), `OPERATOR_TOKEN` and `STEP_UP_SECRET` (step-up demo), `GATEWAY_DELEGATION_SECRET` (optional; if empty, a random secret is used per process) |
@@ -64,14 +64,21 @@ Generate each random secret separately:
 python -c 'import secrets; print(secrets.token_urlsafe(48))'
 ```
 
+Use the **same `VALIDATOR_SERVICE_TOKEN` value in gateway and validator**, at least 32 characters, and never give it to the agent. Restart both services after changing it; restart the agent after changing its model or timeout settings. `GET http://localhost:8002/api/ready` checks the validator with that token and the agent's model configuration before extraction; `/api/health` reports liveness. Missing, short or mismatched tokens fail drafting with a stable 503 error and no extractor call. These checks make no provider/model calls: valid provider credentials, account access and credits still need the documented live smoke checks.
+
+Startup logs and health report missing `VALIDATOR_SERVICE_TOKEN`, `OPERATOR_TOKEN` and `STEP_UP_SECRET` by name only. Missing operator configuration disables the simulated delivery channel; a missing step-up secret uses the existing per-process fallback, so pending codes do not survive restart. Neither blocks otherwise eligible low-risk drafting. The extractor defaults to a 30-second provider request timeout and zero SDK retries, inside the gateway's 45-second wait. If increasing either setting, allow for retries, SDK backoff and gateway reads; this is not a propagated end-to-end deadline.
+
 **3. Run**
 
 ```bash
 make reset-db        # fresh synthetic bank (first run: `make seed` is enough). Also removes enrolled passkeys
+make upgrade-db      # after pulling changes: add new tables and aliases, keep passkeys and history
 make enroll-code     # one-time enrollment code for the demo user (valid 15 minutes)
 make dev             # agent :8001, gateway :8002, validator :8003 (local processes)
 cd web && npm run dev    # second terminal; then open http://localhost:5173
 ```
+
+Ctrl-C cleans up all three services and their reload workers. From another terminal, `make stop` asks this checkout's supervisor to stop its own process groups and waits for cleanup. It never uses a broad process-name kill or signals PIDs from stale files. The supervisor holds a lock and watches a stop marker in ignored `.dev/`; a second `make dev` for the same checkout is refused. These development commands require a POSIX host (macOS/Linux). Use the running UI for the demo; the obsolete `make demo` placeholder has been removed.
 
 Enter the code to enroll a passkey, then sign in with Touch ID. The demo user starts with savings 12,000.00, current 3,500.00 and joint 2,000.00. The seed also includes saved payees (two Johns, Mum, Ah Ma, Landlord Lim, a PayNow contact and a sanctioned "Northwind Trading"), billers (SP Group, Singtel), a credit card with 642.30 outstanding and mock SGX quotes (D05, O39, U11, Z74).
 
@@ -87,6 +94,7 @@ make operator ARGS='code <authorization_id>' # "delivers" and prints the 6-digit
 
 **Things to try**: these phrasings were measured in [docs/evidence/E2E-live.md](docs/evidence/E2E-live.md) and [docs/evidence/T-14-results.md](docs/evidence/T-14-results.md):
 - "Send fifty bucks to Mum from my savings and twenty dollars to Ah Ma from savings"
+- "Send 20 to mom from savings" or "... to ahma ..." (bank aliases and spacing variants resolve directly), "Send 20 to Ahmar from savings" (a near spelling: the assistant asks "Did you mean: Ah Ma (account ending 7766) or none of these?" and can remember "Ahmar" as your nickname). Nicknames are managed on the **Payees** page.
 - "Pay my card balance from my current account and send 15 to John" (then answer "John Doe" and "my current account"; the SGD 657.30 total needs a step-up code)
 - "Move $1,000 from current to savings and then buy DBS shares with half of that from savings"
 - "Send $150 to Northwind Trading from my current account" (blocked: simulated sanctions)

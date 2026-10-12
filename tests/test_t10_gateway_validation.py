@@ -238,7 +238,7 @@ def test_uncertain_asks_for_clarification_and_is_final_for_that_draft(v: V) -> N
 
     # Both saved Johns were shown, so the ambiguity was visible to the validator.
     data = llm.calls[0][1]["content"]
-    assert "payee-johndoe" in data and "John Doe" in data and "payee-mum" not in data
+    assert "payee-johndoe" in data and "John Doe" in data
 
 
 ERROR_CASES: dict[str, tuple[str, Any, str]] = {
@@ -534,7 +534,10 @@ def test_request_is_built_only_from_gateway_held_records(v: V) -> None:
     assert sent.headers["authorization"] == f"Bearer {TOKEN}"
     raw = sent.content.decode()
     body = json.loads(raw)
-    assert set(body) == {"request_id", "conversation", "bundle", "bank_metadata"}
+    assert set(body) == {
+        "request_id", "conversation", "bundle", "bank_metadata", "calculation_evidence",
+    }
+    assert body["calculation_evidence"] == []
     turns = body["conversation"]["turns"]
     assert [t["role"] for t in turns] == [
         "user_text",
@@ -561,10 +564,15 @@ def test_request_is_built_only_from_gateway_held_records(v: V) -> None:
         {"account_id": "acct-joint-01", "display": "Joint ••9012"},
         {"account_id": "acct-matthew-current", "display": "Current ••5678"},
     ]
-    assert body["bank_metadata"]["targets"] == [
+    targets = body["bank_metadata"]["targets"]
+    # The leg target first, then every other saved bank payee so similar names
+    # (John Doe here; Ah Ma vs Mum's alias "Mama") are visible to the validator.
+    assert targets[:2] == [
         {"target_id": "payee-johntan", "display": "John Tan (OCBC ••8892, saved payee)"},
-        {"target_id": "payee-johndoe", "display": "John Doe (DBS ••4521, saved payee)"},
+        {"target_id": "payee-ahma", "display": "Ah Ma (POSB ••7766, saved payee); "
+         "also called Ah Mah, Amah, Grandma"},
     ]
+    assert {t["target_id"] for t in targets} >= {"payee-johndoe", "payee-mum", "payee-ahma"}
     for absent in ("reasoning", "confidence", "summary"):
         assert absent not in raw.lower()
 

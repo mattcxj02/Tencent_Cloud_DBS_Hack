@@ -196,6 +196,7 @@ def render_markdown(results: dict[str, Any]) -> str:
         f"- Extractor: {meta['extractor']['provider']} `{meta['extractor']['model']}`, prompt "
         f"`{meta['extractor']['prompt_version']}` sha256 `{meta['extractor']['prompt_sha256']}`, "
         f"max_tokens {meta['extractor']['max_tokens']}, temperature 0"
+        f", reasoning_effort {meta['extractor'].get('reasoning_effort') or 'unset'}"
     )
     add(
         f"- Validator: {meta['validator']['provider']} `{meta['validator']['model']}`, prompt "
