@@ -122,19 +122,19 @@ Rogue Agent Mode (local only): `uv run python scripts/rogue_agent_demo.py` runs 
 | [docs/JUDGE_QA.md](docs/JUDGE_QA.md) | Likely judge questions with short, honest answers |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Trust zones, approval lifecycle, sequence diagram, as-built differences |
 | [docs/evidence/](docs/evidence/README.md) | Outputs from real runs: smokes, isolation probes, telemetry, extraction, voice, end-to-end, evaluation, CodeBuddy sessions |
-| [docs/PLAN.md](docs/PLAN.md), [docs/instructions.md](docs/instructions.md), [docs/STATUS.md](docs/STATUS.md) | Plan and contracts, task list T-00–T-15, live status and owner actions |
+| [docs/PLAN.md](docs/PLAN.md) | Original plan and contracts (v0.3). Working notes (task prompts, status log, improvement plan) are on the [`dev` branch](https://github.com/mattcxj02/Tencent_Cloud_DBS_Hack/blob/dev/docs/README.md) |
 | [docs/cover/](docs/cover/README.md) | 16:9 cover image (SVG) and export steps |
 | [CODEBUDDY.md](CODEBUDDY.md) | Project rules and invariants given to the coding agents |
 | Folder READMEs | [gateway](gateway/README.md), [agent](agent/README.md), [validator](validator/README.md), [shared](shared/README.md), [ledger](ledger/README.md), [prompts](prompts/README.md), [web](web/README.md), [infra](infra/README.md), [evals](evals/README.md), [scripts](scripts/README.md), [tests](tests/README.md) |
 
-## Status (10 Oct 2026)
+## Status (13 Oct 2026)
 
-Built: all four payment actions, bundles of 1–4 legs, clarifications and corrections, the independent validator, exact-payload passkey approval, hard policy, step-up, mandates, atomic execution, audit, Langfuse, voice through TRTC, the React UI and container isolation. The server side is covered by the pytest suite and by the live runs in [docs/evidence/](docs/evidence/README.md). The React UI is type-checked and builds, but has no automated browser tests. **Still pending:**
+Built: all four payment actions, bundles of 1–4 legs, clarifications (with clickable choices) and corrections, the independent validator, exact-payload passkey approval, hard policy, step-up, mandates, atomic execution, audit, Langfuse, voice through TRTC, live progress stages, the React UI and container isolation. The server side is covered by 1,359 pytest tests and by the live runs in [docs/evidence/](docs/evidence/README.md); extraction takes about 2 s at the median ([T-14-no-think](docs/evidence/T-14-no-think.md)). The React UI is type-checked and builds, with browser fixture pages in `web/tests/`. **Still pending:**
 - a real-browser walkthrough with Touch ID and a microphone (the live end-to-end run used a software passkey over the real HTTP API);
 - the usability sessions (kit ready in [evals/usability/](evals/usability/README.md));
 - the demo video, CodeBuddy screenshots and any hosted deployment.
 
-See [docs/STATUS.md](docs/STATUS.md).
+Limitations are listed in [docs/SUBMISSION.md §7](docs/SUBMISSION.md#7-limitations-and-pending-work).
 
 ## How it was built
 

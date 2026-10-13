@@ -1,10 +1,10 @@
 # CODEBUDDY.md — DCTA project rules
 
-Project: DBS track, Scenario 1, Direct Conversational Transaction Agent. Read `docs/PLAN.md`, `docs/ARCHITECTURE.md` and `docs/instructions.md`. v0.3 retains the full MVP at the user's request. **Langfuse is a required real observability backend**, not an optional exporter or console-log substitute. All implementation tasks remain pending until their checks actually pass.
+Project: DBS track, Scenario 1, Direct Conversational Transaction Agent. Read `docs/PLAN.md`, `docs/ARCHITECTURE.md` and `docs/instructions.md` (on the `dev` branch). v0.3 retains the full MVP at the user's request. **Langfuse is a required real observability backend**, not an optional exporter or console-log substitute. All implementation tasks remain pending until their checks actually pass.
 
 **Scope and authority**
 
-Keep SGD transfers (own account/saved payee/saved PayNow), bill payments, card payments, mock SGX equities, 1–4-leg bundles, dependencies, voice/text, clarification/corrections, WebAuthn, mandates/cooling/pause, KYC/risk/scam controls, simulated secondary approval, audit/evidence UI and evaluations. Tencent APM, TTS and public hosting are optional. `docs/PLAN_REVIEW.md` contains recommendations, including scope cuts the user has not adopted. Do not implement those cuts or silently replace real WebAuthn with a mock. Report schedule/integration blockers honestly.
+Keep SGD transfers (own account/saved payee/saved PayNow), bill payments, card payments, mock SGX equities, 1–4-leg bundles, dependencies, voice/text, clarification/corrections, WebAuthn, mandates/cooling/pause, KYC/risk/scam controls, simulated secondary approval, audit/evidence UI and evaluations. Tencent APM, TTS and public hosting are optional. `docs/PLAN_REVIEW.md` (on the `dev` branch) contains recommendations, including scope cuts the user has not adopted. Do not implement those cuts or silently replace real WebAuthn with a mock. Report schedule/integration blockers honestly.
 
 GenAI generates drafts and fallible semantic assessments; it never authorizes funds. Model calls exist only in agent extraction and the separate read-only validator. The workflow is fixed by code; models do not select tools. Treat either or both models returning a malicious MATCH as an expected test condition. Never describe a prompt as injection-proof or a model result as a signature.
 

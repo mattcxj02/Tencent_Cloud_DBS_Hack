@@ -4,7 +4,7 @@ This folder is evidence of CodeBuddy use for the hackathon submission. It holds 
 
 The figures were compiled on 10 Oct 2026 from the CodeBuddy CLI's own `stream-json` session logs, one JSONL file per run. A small Python script read them from those logs. The logs were not hand-edited, and no figure was estimated.
 
-**Who built what.** CodeBuddy Code CLI 2.160.0 ran headless (`codebuddy -p`). It built T-00 to T-04 and most of T-05. On 10 Oct at 11:13 SGT its credits ran out (HTTP 429, "Credits exhausted"), and they will not reset before the deadline. From then on, Claude Code subagents built the remaining tasks (T-06 to T-15) and finished T-05. A lead Claude Code session, directed by the entrant, reviewed every task, CodeBuddy's included. It read each diff, re-ran the checks and fixed the defects listed in the Outcome column. Those fixes come from [STATUS.md](../../STATUS.md).
+**Who built what.** CodeBuddy Code CLI 2.160.0 ran headless (`codebuddy -p`). It built T-00 to T-04 and most of T-05. On 10 Oct at 11:13 SGT its credits ran out (HTTP 429, "Credits exhausted"), and they will not reset before the deadline. From then on, Claude Code subagents built the remaining tasks (T-06 to T-15) and finished T-05. A lead Claude Code session, directed by the entrant, reviewed every task, CodeBuddy's included. It read each diff, re-ran the checks and fixed the defects listed in the Outcome column. Those fixes come from [STATUS.md](https://github.com/mattcxj02/Tencent_Cloud_DBS_Hack/blob/dev/docs/STATUS.md) (on the `dev` branch).
 
 ## Sessions
 

@@ -1,6 +1,6 @@
 # DBS Track — DCTA Hackathon Plan v0.3
 
-Status: revised 9 October 2026 following the plan review and validator discussion. Planning only; no application implementation is present in this checkout. The full MVP is retained at the user's request, and **Langfuse is required**. The optional scope reductions in `PLAN_REVIEW.md` are recommendations, not the build contract. Implementation tasks: `instructions.md`. Trust boundaries: `ARCHITECTURE.md`. Live progress and owner actions: `STATUS.md`.
+Status: revised 9 October 2026 following the plan review and validator discussion. Planning only; no application implementation is present in this checkout. The full MVP is retained at the user's request, and **Langfuse is required**. The optional scope reductions in `PLAN_REVIEW.md` are recommendations, not the build contract. Implementation tasks: `instructions.md`. (Both are on the `dev` branch.) Trust boundaries: `ARCHITECTURE.md`. Live progress and owner actions: `STATUS.md`.
 
 Solo entrant · DBS Banking track · Direct Conversational Transaction Agent · **Scenario 1: Voice-Enabled Payment and Transaction**, including KYC and basic risk control. Submission: **16 October 2026**; aim to submit on 15 October. Finalists: 23 October. Demo Day: 3 November, marked TBC in the handbook. Exact submission cutoff and DBS preliminary rubric must be checked through the participant channel.
 
