@@ -74,6 +74,7 @@ export function ChatPage() {
   const [busy, setBusy] = useState<Busy>(null)
   const [error, setError] = useState<string | null>(null)
   const [editingTurnId, setEditingTurnId] = useState<string | null>(null)
+  const [composerText, setComposerText] = useState('')
   // After a receipt the conversation is closed: the next message starts a new one, so a
   // paid request can never be drafted (and paid) again from the same words.
   const [approvalPending, setApprovalPending] = useState(false)
@@ -389,17 +390,14 @@ export function ChatPage() {
       <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-slate-700">
         <span>
           {conversationId ? (
-            <>
-              Conversation revision {conversation?.revision ?? '…'} ·{' '}
-              <a className="font-semibold text-indigo-800 underline" href={hrefFor('evidence', conversationId)}>
-                Evidence trail
-              </a>
-            </>
+            <a className="font-semibold text-indigo-800 underline" href={hrefFor('evidence', conversationId)}>
+              Evidence trail for this conversation
+            </a>
           ) : (
             'No conversation yet'
           )}
         </span>
-        <Button variant="secondary" onClick={newConversation} disabled={approvalPending || busy === 'sending' || (flow.kind === 'recover' || flow.kind === 'recovery-error')}>
+        <Button variant="ghost" onClick={newConversation} disabled={approvalPending || busy === 'sending' || (flow.kind === 'recover' || flow.kind === 'recovery-error')}>
           New conversation
         </Button>
       </div>
@@ -411,12 +409,16 @@ export function ChatPage() {
         onStartEdit={setEditingTurnId}
         onCancelEdit={() => setEditingTurnId(null)}
         onSaveEdit={saveEdit}
+        onExample={facilitator ? undefined : (text) => {
+          setComposerText(text)
+          document.getElementById('composer-input')?.focus()
+        }}
       />
 
       {(busy === 'drafting' || busy === 'voice') && <>
         <ProgressNotice progress={progress} />
         {busy === 'drafting' && <Button variant="secondary" onClick={dismiss}>Stop preparing draft</Button>}
-        {busy === 'drafting' && <p className="text-sm">You can correct the transcript above. Saving a correction replaces this draft; it does not cancel a payment already approved.</p>}
+        {busy === 'drafting' && <p className="text-sm">You can still correct what you said above; the draft is then prepared again.</p>}
       </>}
 
       {flow.kind === 'recovery-error' && <Notice kind="error" title="Payment state is not confirmed yet">
@@ -474,7 +476,7 @@ export function ChatPage() {
           <div className="flex flex-wrap gap-2">
             {!isConfigurationError(flow.code) && <Button onClick={() => redraft(flow.validationOnly)}>{flow.validationOnly ? 'Retry validation of saved draft' : 'Prepare draft again'}</Button>}
             {(flow.code === 'CONTEXT_LIMIT_RESTATE' || flow.code === 'CONVERSATION_NOT_FOUND') && (
-              <Button variant="secondary" onClick={newConversation}>
+              <Button variant="ghost" onClick={newConversation}>
                 Start a new conversation
               </Button>
             )}
@@ -500,6 +502,9 @@ export function ChatPage() {
         label={pendingQuestion ? 'Your answer' : 'Your request'}
         placeholder={pendingQuestion ? 'Type your answer…' : 'e.g. Send Mum 50 dollars from savings'}
         disabled={approvalPending || busy !== null || (flow.kind === 'recover' || flow.kind === 'recovery-error')}
+        prominent={flow.kind === 'none' || flow.kind === 'clarify'}
+        text={composerText}
+        onTextChange={setComposerText}
         onSend={sendText}
         onRecorded={sendVoice}
       />

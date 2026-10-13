@@ -91,7 +91,7 @@ const NOTICE: Record<NoticeKind, { cls: string; symbol: string; label: string }>
 }
 
 /**
- * A boxed message with a text label ("Problem:", "Done:"...). Errors are role="alert"
+ * A boxed message with a symbol and a screen-reader label ("Problem:", "Done:"...). Errors are role="alert"
  * and take focus when `focus` is set, so keyboard and screen-reader users land on them.
  */
 export function Notice({
@@ -126,8 +126,15 @@ export function Notice({
         <span aria-hidden="true" className="mr-1 inline-block w-4 text-center">
           {n.symbol}
         </span>
-        {label ?? n.label}
-        {title ? <>: {title}</> : null}
+        {/* With a title, the kind ("Problem", "Note"...) is for screen readers; the symbol shows it on screen. */}
+        {title ? (
+          <>
+            <span className="sr-only">{label ?? n.label}: </span>
+            {title}
+          </>
+        ) : (
+          (label ?? n.label)
+        )}
       </p>
       {children && <div className="mt-1 space-y-2">{children}</div>}
     </div>

@@ -1,6 +1,6 @@
 # web
 
-React 19 + Vite 6 + TypeScript (strict) + Tailwind 3 client for the DCTA prototype. The customer types or speaks payment requests, answers short clarification questions, corrects transcripts, reviews the **exact signing envelope stored by the gateway** and approves it with a passkey (Touch ID). It also manages the spending mandate, shows the evidence trail, and hosts a conventional baseline flow for the usability comparison. Everything is labelled as a **simulated bank**.
+React 19 + Vite 6 + TypeScript (strict) + Tailwind 3 client for the SaySo (DCTA) prototype. The customer types or speaks payment requests, answers short clarification questions, corrects transcripts, reviews the **exact signing envelope stored by the gateway** and approves it with a passkey (Touch ID). It also manages the spending mandate, shows the evidence trail, and hosts a conventional baseline flow for the usability comparison. Everything is labelled as a **simulated bank**.
 
 **Trust boundary.** This code runs in the user's browser and is untrusted. It talks **only to the gateway** (`/api/*`, proxied by Vite to `http://localhost:8002`; see `vite.config.ts`); internal routes and the agent/validator are never reachable. It holds no keys or tokens: the session is an HttpOnly cookie and passkey private keys stay in the authenticator. The UI cannot approve anything by itself. It signs the WebAuthn options the gateway derived from the stored envelope. The gateway then re-verifies the signature, the owner, the envelope hash and all policy before committing. Model-written text (validator reasons, clarification questions, transcripts) is rendered as plain text through React escaping. There is no `dangerouslySetInnerHTML`. Trace links are rendered only for `http(s)` URLs. Money is parsed and added in integer cents.
 
@@ -15,7 +15,7 @@ React 19 + Vite 6 + TypeScript (strict) + Tailwind 3 client for the DCTA prototy
 | `#/evidence[/<conversation_id>]` | "You said → We clarified → You approved → Executed" from `GET /api/conversations/{id}/evidence`. Corrections are shown as replaced, and failed authorizations show their status, not a receipt. Expandable technical details: bundle/envelope/payload hashes, validator model and prompt hash, audit-chain result and events, and trace links (new tab) |
 | `#/baseline` | **Baseline prototype (no money moves)**: a conventional pick-payee → amount → account → review → confirm flow over an in-memory copy of the seed payees/accounts. It makes no gateway calls. Includes the facilitator timer |
 
-The footer toggles a **facilitator timer** on the chat page (local only). It records time and control activations per run and stops by itself when a receipt appears, or on "Mark completed".
+The navigation shows Chat, Payees and Evidence; `#/mandate` and `#/baseline` are reached by URL. Opening the app with `?facilitator=1` turns on a **facilitator timer** on the chat page (local only; `?facilitator=0` or the footer link turns it off). It records time and control activations per run and stops by itself when a receipt appears, or on "Mark completed".
 
 ## Files
 

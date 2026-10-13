@@ -1,4 +1,5 @@
-// Persistent header: simulated-bank label, signed-in user, balances, gateway health, nav.
+// Persistent header: simulated-bank label, product name, signed-in user, balances and nav.
+// Gateway health is shown in the footer (ServiceStatus), away from the customer's task.
 import { useEffect, useState } from 'react'
 import { api } from '../api'
 import type { Health } from '../api'
@@ -7,12 +8,12 @@ import { hrefFor } from '../router'
 import type { Route, RouteName } from '../router'
 import { useSession } from '../session'
 
+// Mandate settings (#/mandate) and the usability baseline (#/baseline) stay reachable by
+// URL; they are not part of the customer's everyday navigation. Limits are enforced either way.
 const NAV: { name: RouteName; label: string; auth: boolean }[] = [
   { name: 'chat', label: 'Chat', auth: true },
   { name: 'payees', label: 'Payees', auth: true },
-  { name: 'mandate', label: 'Mandate', auth: true },
   { name: 'evidence', label: 'Evidence', auth: true },
-  { name: 'baseline', label: 'Baseline', auth: false },
 ]
 
 function useHealth(): { text: string; ok: boolean | null; detail: Health | null } {
@@ -41,9 +42,23 @@ function useHealth(): { text: string; ok: boolean | null; detail: Health | null 
   return state
 }
 
+/** Small footer line: is the (simulated) bank reachable, and is tracing configured. */
+export function ServiceStatus() {
+  const health = useHealth()
+  return (
+    <p className="text-sm" title={health.detail ? `ASR: ${health.detail.trtc ?? '?'} · tracing: ${health.detail.langfuse ?? '?'}` : undefined}>
+      Bank service:{' '}
+      <strong>
+        <span aria-hidden="true">{health.ok === null ? '…' : health.ok ? '● ' : '✕ '}</span>
+        {health.text}
+      </strong>
+      {health.detail?.langfuse && <> · tracing {health.detail.langfuse === 'configured' ? 'on' : 'not configured'}</>}
+    </p>
+  )
+}
+
 export function Header({ route }: { route: Route }) {
   const { status, me, accounts, accountsError, signOut } = useSession()
-  const health = useHealth()
   const signedIn = status === 'signed-in'
 
   return (
@@ -53,7 +68,10 @@ export function Header({ route }: { route: Route }) {
       </p>
       <div className="mx-auto max-w-2xl space-y-2 px-4 py-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <p className="text-lg font-bold">DCTA payments assistant</p>
+          <p className="text-lg">
+            <span className="text-xl font-bold">SaySo</span>
+            <span className="ml-2 hidden text-sm text-slate-300 sm:inline">Nothing moves without your say-so.</span>
+          </p>
           {signedIn && (
             <div className="flex items-center gap-2 text-sm">
               <span>
@@ -69,15 +87,6 @@ export function Header({ route }: { route: Route }) {
             </div>
           )}
         </div>
-
-        <p className="text-sm" title={health.detail ? `ASR: ${health.detail.trtc ?? '?'} · tracing: ${health.detail.langfuse ?? '?'}` : undefined}>
-          Bank service:{' '}
-          <strong>
-            <span aria-hidden="true">{health.ok === null ? '…' : health.ok ? '● ' : '✕ '}</span>
-            {health.text}
-          </strong>
-          {health.detail?.langfuse && <> · tracing {health.detail.langfuse === 'configured' ? 'on' : 'not configured'}</>}
-        </p>
 
         {signedIn && (
           <div className="text-sm">

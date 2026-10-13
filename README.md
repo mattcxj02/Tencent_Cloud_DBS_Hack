@@ -1,6 +1,6 @@
-# DCTA: Direct Conversational Transaction Agent
+# SaySo: a Direct Conversational Transaction Agent (DCTA)
 
-**Speak your payments. Verify every detail. Stay in control.**
+**Speak your payments. Verify every detail. Stay in control.** Nothing moves without your say-so.
 
 Tencent Cloud Hackathon 2026 · DBS track · Scenario 1 (voice-enabled payment and transaction, with KYC and basic risk control).
 
@@ -8,7 +8,7 @@ Tencent Cloud Hackathon 2026 · DBS track · Scenario 1 (voice-enabled payment a
 
 ## What it is
 
-DCTA lets a bank customer say or type routine payments in their own words, for example *"Send fifty bucks to Mum from my savings and twenty dollars to Ah Ma from savings"*. It turns them into one exact bundle of payments, which the customer checks and approves with a passkey (Touch ID). Two AI models read the request: one drafts it and a second checks the draft independently. Neither model can move money. Only a deterministic gateway can, and only for the exact payment the customer's passkey signed.
+SaySo is a payments feature for a bank's app. It lets a customer say or type routine payments in their own words, for example *"Send fifty bucks to Mum from my savings and twenty dollars to Ah Ma from savings"*. It turns them into one exact bundle of payments, which the customer checks and approves with a passkey (Touch ID). Two AI models read the request: one drafts it and a second checks the draft independently. Neither model can move money. Only a deterministic gateway can, and only for the exact payment the customer's passkey signed.
 
 ## The customer flow
 
@@ -32,7 +32,28 @@ DCTA lets a bank customer say or type routine payments in their own words, for e
              cannot approve or pay                   answers MATCH / MISMATCH / UNCERTAIN
 ```
 
-There are three services, each with its own container image ([infra/](infra/README.md)). The **gateway** owns identity, the conversation record, frozen drafts, policy, approvals, execution and the hash-chained audit log. The **agent** reads the stored conversation through a short-lived scoped token. Its model only copies the customer's words for each field. Code turns those words into amounts and saved-payee records. The gateway then checks that every amount, recipient and source account is backed by the customer's own words and names exactly one bank record. The **validator** is a different model from a different vendor. It never sees the extractor's reasoning, and it compares the full conversation with the frozen draft. A MATCH only unlocks the confirmation screen. Approval is a WebAuthn passkey signature over `SHA256("DCTA:approval:v1\0" + canonical envelope)`. The envelope holds the exact payload, user, credential, nonce and an expiry of 120 seconds or less. The gateway executes its own stored bytes after it re-checks the signature, the owner and the full policy, all in one database transaction. Neither model has tools, ledger access or keys, so even a model that is fooled or forced to return MATCH cannot authorize a payment. Every stage is traced in Langfuse, with secrets and account numbers redacted. Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) (diagrams, plus an "As built" section).
+There are three services, each with its own container image ([infra/](infra/README.md)): the **gateway** (trusted and deterministic: identity, the conversation record, policy, approval, execution and the audit log), the **agent** (extractor model) and the **validator** (a second model from another vendor). Neither model has tools, ledger access or keys, so even a model that is fooled, or forced to answer MATCH, cannot authorize a payment.
+
+### Security at a glance
+
+Each row is one of the brief's "What the solution should solve" requirements (handbook pp. 6–7).
+
+| Brief requirement | How SaySo meets it | Evidence |
+|---|---|---|
+| Multi-intent parsing | The extractor only copies the customer's words for each field. Code turns them into amounts, payees and accounts, including "half of that" and "the rest" | 33–34 of 35 live cases correct across three trials, 0 unsafe drafts ([T-14-no-think](docs/evidence/T-14-no-think.md)) |
+| Ambiguity resolution | Code (not the model) writes short questions with tappable choices: "Which John?", "Did you mean Ah Ma?" | [E2E-live](docs/evidence/E2E-live.md) |
+| Independent validation | The validator compares the whole conversation with the frozen draft. Only MATCH unlocks the confirmation; mismatch, uncertainty or an error stops it | 0 of 30 wrong drafts reached approval ([T-14-no-think](docs/evidence/T-14-no-think.md)) |
+| Biometric human-in-the-loop | The confirmation shows the gateway's stored payment. The passkey (Touch ID) signs a SHA-256 hash of exactly those bytes, valid for 2 minutes at most. Any correction voids it | [test_t05_approval.py](tests/test_t05_approval.py) |
+| Zero-trust gateway | Only the gateway can touch the ledger. It executes its own stored bytes, never a client payload, after re-checking the signature, owner and every rule in one transaction | Rogue Agent Mode: 46/46 controls held ([T-13](docs/evidence/T-13-attack-matrix.md)); container isolation ([T-04](docs/evidence/T-04-isolation.txt)) |
+| Injection shielding | References and quoted text cannot supply an amount, payee or account; embedded instructions make the validator answer MISMATCH; models have no tools | 9/9 adversarial cases safe ([T-14](docs/evidence/T-14-results.md)); [T-09](docs/evidence/T-09-extract.md) |
+| Risk and velocity controls | Per-payment and daily limits, velocity, KYC, sanctions and funds checks block outright. Totals above SGD 500 or scam-like wording also need a one-time code from a separate (simulated) channel | Sanctioned and over-limit drafts blocked even after MATCH ([T-14](docs/evidence/T-14-results.md)) |
+| Traceable and auditable | Hash-chained audit log, a readable evidence trail per conversation, and Langfuse traces with secrets and account numbers redacted | [T-08](docs/evidence/T-08-telemetry.md) |
+
+**Also enforced, not shown to the customer:** single-use approvals (a retry or race returns the original receipt, never a second payment); a 120-second, narrowly scoped token for the agent; validator results bound to the draft, conversation and balances they checked; readiness checks before any model call; and mandate changes signed with the passkey, where loosening a limit waits a cooling period (`#/mandate`).
+
+**Production path, not built:** the bank's own fraud, sanctions and KYC engines; a real out-of-band channel (SMS, hardware token or relationship-manager callback); signed receipts and external audit checkpoints; hosting on HTTPS.
+
+Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) (diagrams, plus an "As built" section).
 
 ## Quick start (local demo)
 

@@ -178,7 +178,7 @@ export function DraftReview({
             <Button onClick={onNewConversation}>Start a new conversation</Button>
           ) : null}
           <Button variant={g.action === 'edit' ? 'primary' : 'secondary'} onClick={onEdit}>
-            Edit my request
+            Edit request
           </Button>
           <Button variant="secondary" onClick={onDismiss}>
             Discard draft

@@ -51,7 +51,7 @@ function MicIcon() {
   )
 }
 
-function MicButton({ disabled, onRecorded }: { disabled: boolean; onRecorded: (audio: Blob) => void }) {
+function MicButton({ disabled, prominent, onRecorded }: { disabled: boolean; prominent: boolean; onRecorded: (audio: Blob) => void }) {
   // At the 60 s limit the hook stops by itself and hands over the clip, so nothing is lost.
   const rec = useRecorder({ onAutoStop: onRecorded })
   const [localError, setLocalError] = useState<string | null>(null)
@@ -120,12 +120,13 @@ function MicButton({ disabled, onRecorded }: { disabled: boolean; onRecorded: (a
       )}
       <div className="flex flex-wrap gap-2">
         <Button
-          variant={recording ? 'danger' : 'secondary'}
+          variant={recording ? 'danger' : prominent ? 'primary' : 'secondary'}
           onClick={() => void toggle()}
           disabled={disabled || processing || askConsent}
           aria-pressed={recording}
           busy={processing}
           busyLabel="Preparing audio…"
+          className="min-h-[52px] px-6 text-lg"
         >
           <MicIcon />
           {recording ? 'Stop and send' : 'Speak'}
@@ -158,20 +159,28 @@ function MicButton({ disabled, onRecorded }: { disabled: boolean; onRecorded: (a
   )
 }
 
+/** Voice first, typing second. The text is owned by the page so example chips can fill it. */
 export function Composer({
   label,
   placeholder,
   disabled,
+  prominent = true,
+  text,
+  onTextChange,
   onSend,
   onRecorded,
 }: {
   label: string
   placeholder: string
   disabled: boolean
+  /** False while a draft or confirmation is on screen, so Speak never competes with Approve. */
+  prominent?: boolean
+  text: string
+  onTextChange: (text: string) => void
   onSend: (text: string) => void
   onRecorded: (audio: Blob) => void
 }) {
-  const [text, setText] = useState('')
+  const setText = onTextChange
   const submit = (e: FormEvent) => {
     e.preventDefault()
     const t = text.trim()
@@ -180,26 +189,30 @@ export function Composer({
     setText('')
   }
   return (
-    <form onSubmit={submit} className="space-y-2 rounded-xl border border-slate-300 bg-white p-3 shadow-sm">
-      <label htmlFor="composer-input" className="block text-base font-semibold text-slate-900">
-        {label}
-      </label>
-      <div className="flex flex-col gap-2 sm:flex-row">
-        <input
-          id="composer-input"
-          type="text"
-          value={text}
-          maxLength={2000}
-          autoComplete="off"
-          placeholder={placeholder}
-          onChange={(e) => setText(e.target.value)}
-          className={`${inputClass} flex-1`}
-        />
-        <Button type="submit" disabled={disabled || !text.trim()}>
-          Send
-        </Button>
+    <form onSubmit={submit} className="space-y-3 rounded-xl border border-slate-300 bg-white p-3 shadow-sm">
+      <MicButton disabled={disabled} prominent={prominent} onRecorded={onRecorded} />
+      <div className="space-y-1">
+        <label htmlFor="composer-input" className="block text-base font-semibold text-slate-900">
+          Or type {label.charAt(0).toLowerCase() + label.slice(1)}
+        </label>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <input
+            id="composer-input"
+            type="text"
+            value={text}
+            maxLength={2000}
+            autoComplete="off"
+            placeholder={placeholder}
+            readOnly={disabled} // read-only, not disabled, so keyboard focus is not lost on send
+            aria-disabled={disabled || undefined}
+            onChange={(e) => setText(e.target.value)}
+            className={`${inputClass} flex-1 read-only:bg-slate-100`}
+          />
+          <Button type="submit" variant="secondary" disabled={disabled || !text.trim()}>
+            Send
+          </Button>
+        </div>
       </div>
-      <MicButton disabled={disabled} onRecorded={onRecorded} />
     </form>
   )
 }

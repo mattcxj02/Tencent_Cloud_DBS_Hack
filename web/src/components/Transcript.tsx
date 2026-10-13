@@ -102,6 +102,14 @@ function TurnEditor({
   )
 }
 
+/** Phrasings measured end to end (README "Things to try"); tapping one fills the input.
+ *  Without onExample (usability sessions) no examples are shown, so testers are not primed. */
+const EXAMPLES = [
+  'Send fifty bucks to Mum from my savings and twenty dollars to Ah Ma from savings',
+  'Pay my card balance from my current account and send 15 to John',
+  'Move $1,000 from current to savings and then buy DBS shares with half of that from savings',
+]
+
 export function Transcript({
   turns,
   editingTurnId,
@@ -109,6 +117,7 @@ export function Transcript({
   onStartEdit,
   onCancelEdit,
   onSaveEdit,
+  onExample,
 }: {
   turns: VisibleTurn[]
   editingTurnId: string | null
@@ -116,15 +125,31 @@ export function Transcript({
   onStartEdit: (turnId: string) => void
   onCancelEdit: () => void
   onSaveEdit: (turnId: string, text: string) => void
+  onExample?: (text: string) => void
 }) {
   if (turns.length === 0) {
     return (
       <div className="rounded-xl border border-dashed border-slate-400 bg-white p-4 text-base text-slate-700">
-        <p className="font-semibold text-slate-900">Tell me what to pay, in your own words.</p>
-        <p className="mt-1">
-          For example: “Send John 50 dollars from savings and pay off my credit card”, or “Buy 500 dollars of DBS
-          shares”.
-        </p>
+        <p className="font-semibold text-slate-900">Say what to pay, in your own words. Up to four payments at once.</p>
+        {onExample && (
+          <>
+            <p className="mt-1">Try one of these:</p>
+            <ul className="mt-2 flex flex-col gap-2" aria-label="Example requests">
+              {EXAMPLES.map((ex) => (
+                <li key={ex}>
+                  <button
+                    type="button"
+                    onClick={() => onExample(ex)}
+                    disabled={busy}
+                    className="min-h-[44px] w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-left text-slate-900 hover:bg-indigo-50 disabled:opacity-60"
+                  >
+                    “{ex}”
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
       </div>
     )
   }

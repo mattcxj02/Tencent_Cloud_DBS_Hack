@@ -1,4 +1,4 @@
-# Judge Q&A: DCTA
+# Judge Q&A: SaySo (DCTA)
 
 Short, honest answers to the questions judges are likely to ask. Numbers come from [evidence/](evidence/README.md) as of 10 Oct 2026. If a question is not covered here, say what was measured and what was not.
 
@@ -34,7 +34,7 @@ Real: passkey verification (`py_webauthn`), Tencent TRTC speech recognition, the
 - **TRTC transcription:** 260–493 ms on 3 clips ([T-12](evidence/T-12-voice.md)).
 - **Live two-payment request:** ready in 8.2 s ([E2E](evidence/E2E-live.md)).
 
-This is still slower than tapping one saved payee. The case for DCTA is several payments in one request, plus accessibility, and the usability comparison that would test it is still pending. Next step: streaming ASR.
+This is still slower than tapping one saved payee. The case for SaySo is several payments in one request, plus accessibility, and the usability comparison that would test it is still pending. Next step: streaming ASR.
 
 **7. What does it cost to run?**
 Not measured. No model prices were configured, so cost is recorded as "unavailable", not zero. Token counts were measured ([T-14](evidence/T-14-results.md)):

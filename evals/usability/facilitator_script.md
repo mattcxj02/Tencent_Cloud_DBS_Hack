@@ -23,7 +23,7 @@ Are you happy to take part?" → record **consent Y/N**. If no, stop here.
 ## 2. Setup (1 min)
 
 - Order for this participant: A (baseline first) for P1/P3/P5, B (DCTA first) for P2/P4.
-- Fresh database (`make reset-db`), demo passkey signed in, facilitator timer on.
+- Fresh database (`make reset-db`), demo passkey signed in, facilitator timer on (`http://localhost:5173/?facilitator=1#/chat`; the baseline is `#/baseline`).
 
 ## 3. Tasks (≈6 min per interface)
 

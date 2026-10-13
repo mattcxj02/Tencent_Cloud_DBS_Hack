@@ -1,10 +1,10 @@
-# Submission: DCTA (DBS track, Scenario 1)
+# Submission: SaySo (DBS track, Scenario 1)
 
 This page follows the submission fields on handbook p. 37. Every number comes from a file in [evidence/](evidence/README.md), and each is cited where it appears. Status as of 10 Oct 2026. Items marked **pending** are not done yet.
 
 | Field | Entry |
 |---|---|
-| **Project title** | DCTA: Direct Conversational Transaction Agent |
+| **Project title** | SaySo: a Direct Conversational Transaction Agent (DCTA) |
 | **Short blurb** (under 10 words) | **Speak your payments. Verify every detail. Stay in control.** (9 words) |
 | **Track and scenario** | DBS · Scenario 1: Voice-Enabled Payment and Transaction, with KYC and basic risk control (handbook p. 8) |
 | **Project description** | Below: short version, then sections 1–8 |
@@ -15,7 +15,7 @@ This page follows the submission fields on handbook p. 37. Every number comes fr
 
 ## Short description (paste-ready)
 
-DCTA is a voice and chat payments assistant for DBS Scenario 1. A signed-in customer says or types routine payments in their own words, up to four in one message. It handles transfers to saved payees, PayNow contacts or the customer's own accounts, bills, credit-card balances and mock SGX share purchases. It asks short questions when something is unclear ("Which John?"), lets the customer correct the transcript, and shows one exact confirmation. One model (the extractor) only copies the customer's words. A second model from another vendor independently checks the draft against the whole conversation. Neither model can pay. A deterministic gateway executes only the exact payment the customer's passkey signed, after KYC, mandate-limit, sanctions, funds and velocity checks. Larger or scam-like payments also need a one-time code from a separate channel. Every step is recorded in a hash-chained audit trail and in Langfuse. Measured on 35 live test cases: 34 correct outcomes and 0 unsafe drafts. On 31 deliberately wrong drafts, the validator let none through to approval. Simulated bank, synthetic data.
+SaySo is a voice and chat payments feature for a bank's app: a Direct Conversational Transaction Agent (DCTA) for DBS Scenario 1. Nothing moves without the customer's say-so. A signed-in customer says or types routine payments in their own words, up to four in one message. It handles transfers to saved payees, PayNow contacts or the customer's own accounts, bills, credit-card balances and mock SGX share purchases. It asks short questions when something is unclear ("Which John?"), lets the customer correct the transcript, and shows one exact confirmation. One model (the extractor) only copies the customer's words. A second model from another vendor independently checks the draft against the whole conversation. Neither model can pay. A deterministic gateway executes only the exact payment the customer's passkey signed, after KYC, mandate-limit, sanctions, funds and velocity checks. Larger or scam-like payments also need a one-time code from a separate channel. Every step is recorded in a hash-chained audit trail and in Langfuse. Measured on 35 live test cases: 34 correct outcomes and 0 unsafe drafts. On 31 deliberately wrong drafts, the validator let none through to approval. Simulated bank, synthetic data.
 
 ## 1. Project overview
 
@@ -208,8 +208,8 @@ There is one demo user (plus a second user, Ana, who shares the joint account), 
 
 This is a sketch of how the design could be piloted by a bank. **No DBS integration, approval or regulatory assessment has been sought or obtained.**
 
-1. **Internal sandbox.** Run DCTA against the bank's test environment and test accounts. Red-team it with the T-13/T-14 attack and golden sets, extended with real (consented) Singlish and multilingual voice samples. Measure error, false-reject and latency rates.
-2. **Assist-only pilot for authenticated customers.** Inside the existing app session, DCTA drafts and confirms, then hands the exact payload to the app's **existing** payment flow and authentication. There is no new execution path, and only saved payees, billers and own cards are allowed.
+1. **Internal sandbox.** Run SaySo against the bank's test environment and test accounts. Red-team it with the T-13/T-14 attack and golden sets, extended with real (consented) Singlish and multilingual voice samples. Measure error, false-reject and latency rates.
+2. **Assist-only pilot for authenticated customers.** Inside the existing app session, SaySo drafts and confirms, then hands the exact payload to the app's **existing** payment flow and authentication. There is no new execution path, and only saved payees, billers and own cards are allowed.
 3. **Limited execution for opted-in customers.** The gateway calls the bank's existing payment APIs, using:
    - the bank's device binding and digital-token step-up instead of our passkey and operator console;
    - the bank's fraud, AML and sanctions engines instead of the mocks;

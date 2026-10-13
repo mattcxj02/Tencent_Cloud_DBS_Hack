@@ -6,7 +6,7 @@ import { BaselinePage } from './components/BaselinePage'
 import { ChatPage } from './components/Chat'
 import { EvidencePage } from './components/EvidencePage'
 import { setFacilitatorEnabled, useFacilitatorEnabled } from './components/FacilitatorPanel'
-import { Header } from './components/Header'
+import { Header, ServiceStatus } from './components/Header'
 import { MandatePage } from './components/MandatePage'
 import { PayeesPage } from './components/PayeesPage'
 import { navigate, useHashRoute } from './router'
@@ -29,8 +29,15 @@ function Shell() {
   const facilitator = useFacilitatorEnabled()
 
   useEffect(() => {
-    document.title = `${TITLE[route.name]} — DCTA (simulated bank)`
+    document.title = `${TITLE[route.name]} — SaySo (simulated bank)`
   }, [route.name])
+
+  // Usability sessions turn the facilitator timer on with ?facilitator=1 (and off with =0),
+  // so customers never see the toggle.
+  useEffect(() => {
+    const flag = new URLSearchParams(window.location.search).get('facilitator')
+    if (flag === '1' || flag === '0') setFacilitatorEnabled(flag === '1')
+  }, [])
 
   // Signed in on the sign-in route: go to chat.
   useEffect(() => {
@@ -66,17 +73,19 @@ function Shell() {
       </main>
       <footer className="mx-auto max-w-2xl px-4 pb-6 text-sm text-slate-700">
         <p>
-          Prototype on a simulated bank: accounts, PayNow, SGX quotes, KYC, sanctions and the phone code are all mock
+          SaySo prototype on a simulated bank: accounts, PayNow, SGX quotes, KYC, sanctions and the phone code are all mock
           services. Passkey approval is real WebAuthn on this device.
         </p>
-        <button
-          type="button"
-          onClick={() => setFacilitatorEnabled(!facilitator)}
-          className="mt-2 min-h-[44px] underline underline-offset-2"
-          aria-pressed={facilitator}
-        >
-          Facilitator timer on chat: {facilitator ? 'on' : 'off'}
-        </button>
+        <ServiceStatus />
+        {facilitator && (
+          <button
+            type="button"
+            onClick={() => setFacilitatorEnabled(false)}
+            className="mt-2 min-h-[44px] underline underline-offset-2"
+          >
+            Turn off facilitator timer
+          </button>
+        )}
       </footer>
     </div>
   )

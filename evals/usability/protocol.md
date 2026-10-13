@@ -35,8 +35,9 @@ never a significance claim.
 
 1. Clean start: `make reset-db` (fresh synthetic seed), start gateway/agent/validator and
    the web app as for the demo, sign in with the demo passkey.
-2. Turn on the facilitator timer (header button "Facilitator timer"); it counts control
-   activations and time per task on both pages and stores nothing outside the page. Keep a
+2. Turn on the facilitator timer by opening `http://localhost:5173/?facilitator=1#/chat` (`?facilitator=0` turns it off; the baseline form is at `#/baseline`, which is not in the navigation); it counts control
+   activations and time per task on both pages and stores nothing outside the page. While it
+   is on, the chat hides its tappable example requests. Keep a
    stopwatch as a fallback.
 3. Print or show the three task cards (below) one at a time. Do not show the chat
    examples or the evidence page.

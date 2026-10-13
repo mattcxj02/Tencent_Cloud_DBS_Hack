@@ -6,9 +6,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api, ApiError } from '../api'
 import type { ApproveResult, AuthorizationView, CommittedResult, DraftBundle } from '../api'
 import { describeCode, describeCodes, isConfigurationError, splitCode } from '../messages'
-import { diffLegs, fromDraftLeg, fromEnvelopeLeg } from '../legs'
+import { diffLegs, fromDraftLeg, fromEnvelopeLeg, totalCents } from '../legs'
 import type { LegView } from '../legs'
-import { formatMoney } from '../money'
+import { formatCents, formatMoney } from '../money'
 import { formatSeconds, formatTime, parseIso } from '../format'
 import { useCountdown } from '../hooks'
 import { PasskeyError, signWithPasskey } from '../passkey'
@@ -359,12 +359,11 @@ export function Confirmation({
   const canLeave = !(existingAuthorizationId && ['issue-failed', 'issuing', 'recovering', 'unknown'].includes(phase.kind))
   const validation = draft.validation
   const title = headingFor(phase, legs.length || draft.legs.length)
+  const total = totalCents(legs)
 
   return (
     <Card title={title} titleId="confirm-heading" headingRef={headingRef}>
       <div className="space-y-4">
-        <p className="text-sm font-semibold text-slate-700">Simulated bank — no real money moves.</p>
-
         {phase.kind === 'issuing' && <Notice kind="info" title="Preparing the exact details for you to approve…" />}
         {phase.kind === 'recovering' && <Notice kind="info" title="Checking whether your payment went through…" />}
 
@@ -443,10 +442,10 @@ export function Confirmation({
               variant="approve"
               onClick={approve}
               busy={phase.kind !== 'review'}
-              busyLabel={phase.kind === 'signing' ? 'Waiting for your passkey…' : 'Sending approval…'}
+              busyLabel={phase.kind === 'signing' ? 'Waiting for Touch ID / Windows Hello…' : 'Sending approval…'}
               disabled={busy || remaining === 0}
             >
-              Approve with passkey (Touch ID / Windows Hello)
+              {total === null ? 'Approve with passkey' : `Approve SGD ${formatCents(total)} with passkey`}
             </Button>
           )}
           {(phase.kind === 'expired' || phase.kind === 'reissue' || (phase.kind === 'issue-failed' && !isConfigurationError(phase.code))) && (
@@ -503,7 +502,7 @@ function VerdictLine({ verdict }: { verdict: string | null }) {
     return (
       <p className="text-base">
         <Badge tone="good">✓ Independent check: matches what you said</Badge>{' '}
-        <span className="text-sm text-slate-700">An automated reviewer compared this with your words. It can be wrong — please read every line.</span>
+        <span className="text-sm text-slate-700">An automated second reading. Please still check every line.</span>
       </p>
     )
   }

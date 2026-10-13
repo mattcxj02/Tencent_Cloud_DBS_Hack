@@ -16,9 +16,10 @@ body {
   outline-offset: 2px;
 }
 
-/* Headings and regions that receive programmatic focus show a subtler ring. */
-[tabindex='-1']:focus-visible {
-  outline: 3px dashed #1e40af;
+/* Headings and regions get programmatic focus only to move screen readers and keyboard
+   users to new content; they are not controls, so they show no ring. */
+[tabindex='-1']:focus {
+  outline: none;
 }
 
 @media (prefers-reduced-motion: reduce) {

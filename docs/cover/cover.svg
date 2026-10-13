@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080" role="img" aria-labelledby="t d">
-  <title id="t">DCTA: Direct Conversational Transaction Agent</title>
+  <title id="t">SaySo: a Direct Conversational Transaction Agent (DCTA)</title>
   <desc id="d">Cover image. Speak your payments. Verify every detail. Stay in control. DBS Track, Scenario 1. A diagram shows an AI zone with an agent that drafts and a validator that checks, both without payment tools, feeding a trusted gateway that pays only what the customer's passkey approved.</desc>
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
@@ -18,9 +18,9 @@
     <rect x="120" y="96" width="560" height="72" rx="36" fill="none" stroke="#2EC4B6" stroke-width="3"/>
     <text x="400" y="144" text-anchor="middle" font-size="32" font-weight="700" letter-spacing="3" fill="#2EC4B6">DBS TRACK · SCENARIO 1</text>
 
-    <text x="110" y="410" font-size="230" font-weight="800" letter-spacing="4" fill="#FFFFFF">DCTA</text>
-    <text x="120" y="490" font-size="46" font-weight="500" fill="#A9BCD6">Direct Conversational</text>
-    <text x="120" y="548" font-size="46" font-weight="500" fill="#A9BCD6">Transaction Agent</text>
+    <text x="110" y="410" font-size="230" font-weight="800" letter-spacing="4" fill="#FFFFFF">SaySo</text>
+    <text x="120" y="512" font-size="46" font-weight="500" fill="#A9BCD6">Direct Conversational</text>
+    <text x="120" y="570" font-size="46" font-weight="500" fill="#A9BCD6">Transaction Agent</text>
 
     <text x="120" y="700" font-size="70" font-weight="700" fill="#FFFFFF">Speak your payments.</text>
     <text x="120" y="790" font-size="70" font-weight="700" fill="#2EC4B6">Verify every detail.</text>

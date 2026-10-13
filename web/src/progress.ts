@@ -23,7 +23,7 @@ export interface Progress {
 export const STAGES: Record<Progress['stage'], string> = {
   captured: 'Input captured', transcribing: 'Transcribing your recording',
   extracting: 'Reading your request', resolving: 'Resolving payment details',
-  validating: 'Checking the frozen draft independently', ready: 'Draft ready',
+  validating: 'Double-checking the details independently', ready: 'Draft ready',
   needs_input: 'Your input is needed', failed: 'Processing stopped',
 }
 
