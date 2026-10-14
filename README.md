@@ -6,6 +6,10 @@ Tencent Cloud Hackathon 2026 · DBS track · Scenario 1 (voice-enabled payment a
 
 > **Simulated bank, synthetic data.** This is a hackathon prototype. It is not connected to DBS or to any real bank, PayNow, SGX, KYC or sanctions service. All accounts, payees, balances, share quotes and second-factor codes are synthetic. No real money moves.
 
+[![SaySo launch video: one spoken request, from words to receipt (24 s). Click to play.](docs/launch/poster.jpg)](docs/launch/sayso-launch.mp4)
+
+<p align="center"><a href="docs/launch/sayso-launch.mp4"><b>▶ Watch the 24-second launch video</b></a> · <a href="docs/launch/README.md">how it was made</a></p>
+
 ## What it is
 
 SaySo is a payments feature for a bank's app. It lets a customer say or type routine payments in their own words, for example *"Send fifty bucks to Mum from my savings and twenty dollars to Ah Ma from savings"*. It turns them into one exact bundle of payments, which the customer checks and approves with a passkey (Touch ID). Two AI models read the request: one drafts it and a second checks the draft independently. Neither model can move money. Only a deterministic gateway can, and only for the exact payment the customer's passkey signed.
@@ -19,6 +23,15 @@ SaySo is a payments feature for a bank's app. It lets a customer say or type rou
 5. **Review the exact confirmation:** every payment, its source account, amounts, total debit and the result of the independent check.
 6. **Approve with Touch ID or your passkey.** A total above SGD 500 (a prototype setting) or scam-like wording ("a police officer told me…") also needs a one-time code from a separate, simulated channel. Hard limits, KYC, sanctions, funds and velocity rules block a payment outright, and no code overrides them.
 7. **Get a receipt and an evidence trail:** *You said → We clarified → You approved → Executed*.
+
+One request, end to end (frames from the [launch video](docs/launch/README.md)):
+
+| | | |
+|:---:|:---:|:---:|
+| ![You say the request](docs/launch/stills/01-you-say.jpg) | ![The AI copies words; code turns them into exact values](docs/launch/stills/02-read-and-resolve.jpg) | ![One short question instead of a guess](docs/launch/stills/03-clarify.jpg) |
+| **1. You say it.** Voice or text, in your own words. | **2. AI reads, code decides.** The model only copies words; code turns them into exact amounts, or a question. | **3. One short question.** Code writes the choices from your saved payees. |
+| ![You sign exactly what you see](docs/launch/stills/04-approve.jpg) | ![Measured on live runs](docs/launch/stills/05-proof.jpg) | ![Nothing moves without your say-so](docs/launch/stills/06-say-so.jpg) |
+| **4. You sign exactly what you see.** Independent check, passkey, one-time code, executed. | **5. Measured.** 0 / 30 wrong drafts reached approval; 46 / 46 attacks held. | **6. Nothing moves without your say-so.** |
 
 ## Architecture and trust boundary
 
@@ -144,7 +157,8 @@ Rogue Agent Mode (local only): `uv run python scripts/rogue_agent_demo.py` runs 
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Trust zones, approval lifecycle, sequence diagram, as-built differences |
 | [docs/evidence/](docs/evidence/README.md) | Outputs from real runs: smokes, isolation probes, telemetry, extraction, voice, end-to-end, evaluation, CodeBuddy sessions |
 | [docs/PLAN.md](docs/PLAN.md) | Original plan and contracts (v0.3). Working notes (task prompts, status log, improvement plan) are on the [`dev` branch](https://github.com/mattcxj02/Tencent_Cloud_DBS_Hack/blob/dev/docs/README.md) |
-| [docs/cover/](docs/cover/README.md) | 16:9 cover image (SVG) and export steps |
+| [docs/launch/](docs/launch/README.md) | 24-second launch video, poster, scene stills, 16:9 covers, storyboard and the Hyperframes source |
+| [docs/cover/](docs/cover/README.md) | Original 16:9 cover image (SVG) and export steps |
 | [CODEBUDDY.md](CODEBUDDY.md) | Project rules and invariants given to the coding agents |
 | Folder READMEs | [gateway](gateway/README.md), [agent](agent/README.md), [validator](validator/README.md), [shared](shared/README.md), [ledger](ledger/README.md), [prompts](prompts/README.md), [web](web/README.md), [infra](infra/README.md), [evals](evals/README.md), [scripts](scripts/README.md), [tests](tests/README.md) |
 
@@ -153,10 +167,35 @@ Rogue Agent Mode (local only): `uv run python scripts/rogue_agent_demo.py` runs 
 Built: all four payment actions, bundles of 1–4 legs, clarifications (with clickable choices) and corrections, the independent validator, exact-payload passkey approval, hard policy, step-up, mandates, atomic execution, audit, Langfuse, voice through TRTC, live progress stages, the React UI and container isolation. The server side is covered by 1,359 pytest tests and by the live runs in [docs/evidence/](docs/evidence/README.md); extraction takes about 2 s at the median ([T-14-no-think](docs/evidence/T-14-no-think.md)). The React UI is type-checked and builds, with browser fixture pages in `web/tests/`. **Still pending:**
 - a real-browser walkthrough with Touch ID and a microphone (the live end-to-end run used a software passkey over the real HTTP API);
 - the usability sessions (kit ready in [evals/usability/](evals/usability/README.md));
-- the demo video, CodeBuddy screenshots and any hosted deployment.
+- the 5–8 minute demo video (a 24-second [launch video](docs/launch/README.md) is done), CodeBuddy screenshots and any hosted deployment.
 
 Limitations are listed in [docs/SUBMISSION.md §7](docs/SUBMISSION.md#7-limitations-and-pending-work).
 
 ## How it was built
 
 CodeBuddy Code CLI built tasks T-00 to T-04 and most of T-05 in headless sessions (logs summarized in [docs/evidence/codebuddy/](docs/evidence/codebuddy/README.md)) until its credits ran out on 10 Oct. Claude Code subagents built the remaining tasks. A lead Claude Code session reviewed every task: it read the diffs, re-ran the checks and fixed the defects it found.
+
+## Credits
+
+**Building SaySo**
+
+| Tool or service | Used for |
+|---|---|
+| [CodeBuddy Code](https://www.codebuddy.ai/) | Built tasks T-00 to T-04 and most of T-05 ([session logs](docs/evidence/codebuddy/README.md)) |
+| [Claude Code](https://claude.com/claude-code) | Built the remaining tasks and reviewed every task |
+| Tencent Cloud [TokenHub](https://www.tencentcloud.com/) (`hy3`) | Extractor model |
+| [DeepSeek](https://www.deepseek.com/) | Independent validator model |
+| [Tencent TRTC](https://trtc.io/) | Speech recognition for voice requests |
+| [Langfuse](https://langfuse.com/) | Tracing and evaluation experiments |
+
+**Launch video and images** ([details and licences](docs/launch/README.md#credits))
+
+| Tool or asset | Used for | Licence |
+|---|---|---|
+| [brag](https://github.com/latent-spaces/brag) by latent-spaces | Launch-video workflow: storyboard, brief, poster, share copy | MIT |
+| [Hyperframes](https://github.com/heygen-com/hyperframes) by HeyGen | Composition checks and rendering | Apache-2.0 |
+| [GSAP](https://gsap.com) | Animation | GSAP Standard License |
+| "Happy Beats / Business Moves" vol. 11 by [ende.app](https://ende.app/en) | Music | Bundled with brag |
+| [Kenney](https://kenney.nl/) and unicae_games sound packs | Sound effects | CC0 |
+| Space Grotesk, IBM Plex Sans, JetBrains Mono | Type | SIL OFL 1.1 |
+| Claude Code | Followed the brag workflow, wrote and rendered the composition | — |

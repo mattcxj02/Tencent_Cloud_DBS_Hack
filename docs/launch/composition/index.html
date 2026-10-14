@@ -1,0 +1,406 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=1920, height=1080" />
+<title>SaySo: launch video</title>
+<script src="assets/vendor/gsap.min.js"></script>
+<script src="assets/audio-data.js"></script>
+<style>
+  @font-face { font-family: 'Space Grotesk'; font-style: normal; font-weight: 300 700; font-display: block; src: url('assets/fonts/SpaceGrotesk.woff2') format('woff2'); }
+  @font-face { font-family: 'IBM Plex Sans'; font-style: normal; font-weight: 100 700; font-display: block; src: url('assets/fonts/IBMPlexSans.woff2') format('woff2'); }
+  @font-face { font-family: 'JetBrains Mono'; font-style: normal; font-weight: 100 800; font-display: block; src: url('assets/fonts/JetBrainsMono.woff2') format('woff2'); }
+
+  :root {
+    --navy: #101826; --card: #1A2536; --line: #3A4A63; --cream: #F5F2EB; --muted: #B8C2D0; --dim: #8C98AA;
+    --amber: #E8A33D; --teal: #45B5AC; --teal-dk: #1C6E68; --ink-muted: #5B6372; --cream-line: #CFC7B6;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--navy); color: var(--cream); font-family: 'IBM Plex Sans', sans-serif; }
+  #root { position: relative; width: 100%; height: 100%; overflow: hidden; background: var(--navy); }
+  .clip { position: absolute; inset: 0; }
+  .mono { font-family: 'JetBrains Mono', monospace; letter-spacing: 2px; text-transform: uppercase; }
+  .display { font-family: 'Space Grotesk', sans-serif; }
+
+  /* ---------- background layer ---------- */
+  .bg { position: absolute; inset: 0; }
+  .grid { position: absolute; inset: 0; background-image: radial-gradient(rgba(184,194,208,0.16) 1.6px, transparent 1.8px); background-size: 48px 48px; }
+  .glow { position: absolute; border-radius: 50%; }
+  #glow-a { left: -380px; top: -420px; width: 1300px; height: 1300px; background: radial-gradient(closest-side, rgba(232,163,61,0.30), rgba(232,163,61,0) 70%); }
+  #glow-t { right: -420px; bottom: -520px; width: 1400px; height: 1400px; background: radial-gradient(closest-side, rgba(69,181,172,0.26), rgba(69,181,172,0) 70%); }
+
+  /* ---------- persistent chrome ---------- */
+  #chrome .brand { position: absolute; left: 128px; top: 56px; display: flex; align-items: center; gap: 16px; }
+  #chrome .brand-mark { display: block; width: 74px; height: 58px; }
+  #chrome .brand-name { font-family: 'Space Grotesk', sans-serif; font-weight: 600; font-size: 36px; color: var(--cream); }
+  #chrome .disclaimer { position: absolute; right: 128px; top: 72px; font-size: 22px; color: var(--dim); }
+
+  #rail { position: absolute; left: 128px; bottom: 64px; display: flex; gap: 12px; }
+  #rail .chip { font-size: 24px; line-height: 1.4; padding: 6px 18px; border-radius: 999px; border: 2px solid var(--line); color: var(--dim); }
+  #rail .chip.done { border-color: var(--teal); color: var(--teal); }
+  #rail .chip.on { background: var(--cream); border-color: var(--cream); color: var(--navy); }
+
+  /* ---------- scene 1: you say ---------- */
+  #wave { position: absolute; left: 128px; top: 210px; height: 320px; display: flex; align-items: center; gap: 18px; }
+  #wave .bar { display: block; width: 16px; border-radius: 8px; background: var(--amber); transform-origin: 50% 50%; }
+  #wave .bar i { display: block; width: 100%; height: 100%; border-radius: 8px; background: var(--amber); transform-origin: 50% 50%; }
+  #s1-label { position: absolute; left: 128px; top: 590px; font-size: 26px; color: var(--amber); }
+
+  #sentence-clip { pointer-events: none; }
+  #sentence { position: absolute; left: 128px; top: 640px; width: 1640px; transform-origin: 0 0; font-family: 'Space Grotesk', sans-serif; font-weight: 500; font-size: 76px; line-height: 1.16; color: var(--cream); }
+  #sentence .w { opacity: 0; }
+  #sentence .hl { background-image: linear-gradient(rgba(232,163,61,0.30), rgba(232,163,61,0.30)); background-repeat: no-repeat; background-size: 0% 100%; background-position: 0 0; border-radius: 6px; padding: 0 4px; margin: 0 -4px; }
+  #caret { display: inline-block; width: 6px; height: 72px; margin-left: 8px; vertical-align: -10px; background: var(--amber); }
+
+  /* ---------- scene 2: read + resolve ---------- */
+  #s2 .label { position: absolute; left: 128px; top: 150px; font-size: 24px; color: var(--amber); }
+  #s2 .head { position: absolute; left: 128px; top: 190px; width: 1664px; font-size: 58px; font-weight: 600; line-height: 1.1; }
+  #s2 .head em { font-style: normal; color: var(--teal); }
+  #rows { position: absolute; left: 128px; top: 470px; width: 1664px; display: flex; flex-direction: column; gap: 18px; }
+  .row { display: grid; grid-template-columns: 560px 120px 1fr; align-items: center; height: 108px; padding: 0 40px; background: var(--card); border-radius: 18px; border: 2px solid var(--line); }
+  .row .q { font-family: 'JetBrains Mono', monospace; font-size: 36px; color: var(--amber); }
+  .row .arrow { display: block; width: 72px; height: 4px; border-radius: 2px; background: var(--teal); transform-origin: 0 50%; }
+  .row .r { display: flex; align-items: baseline; gap: 22px; }
+  .row .v { font-family: 'Space Grotesk', sans-serif; font-weight: 600; font-size: 46px; color: var(--teal); }
+  .row .n { font-size: 26px; color: var(--muted); }
+  .row.ask { border-color: rgba(232,163,61,0.6); }
+  .row.ask .v { color: var(--amber); }
+
+  /* ---------- light UI cards ---------- */
+  .ui-card { position: absolute; background: var(--cream); color: var(--navy); border-radius: 28px; padding: 48px; box-shadow: 0 40px 80px rgba(0,0,0,0.35); }
+  .ui-card .mono { font-size: 24px; color: var(--teal-dk); }
+
+  /* ---------- scene 3: clarify ---------- */
+  #ask-card { left: 128px; top: 230px; width: 900px; }
+  #ask-card .qn { font-family: 'Space Grotesk', sans-serif; font-weight: 600; font-size: 52px; margin: 20px 0 32px; }
+  .opt { position: relative; display: flex; align-items: center; gap: 18px; height: 100px; padding: 0 32px; border: 2px solid var(--cream-line); border-radius: 16px; font-size: 34px; margin-top: 18px; color: var(--navy); }
+  .opt .tick { display: block; width: 40px; height: 40px; border-radius: 50%; border: 2px solid var(--cream-line); flex: none; }
+  .opt .fill { position: absolute; inset: -2px; border-radius: 16px; border: 3px solid var(--teal-dk); background: rgba(69,181,172,0.16); opacity: 0; }
+  .opt .tick-on { position: absolute; left: 32px; top: 30px; width: 40px; height: 40px; opacity: 0; }
+  .opt span { position: relative; }
+  .side { position: absolute; left: 1130px; width: 662px; }
+  .side .mono { font-size: 24px; color: var(--teal); }
+  .side .big { font-family: 'Space Grotesk', sans-serif; font-weight: 600; font-size: 66px; line-height: 1.1; margin-top: 18px; }
+  #s3 .side { top: 330px; }
+
+  .cursor { position: absolute; left: 0; top: 0; width: 46px; height: 56px; }
+
+  /* ---------- scene 4: approve ---------- */
+  #confirm { left: 128px; top: 150px; width: 860px; }
+  #confirm .leg { display: flex; justify-content: space-between; align-items: baseline; margin-top: 26px; font-size: 34px; }
+  #confirm .amt { font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: 40px; }
+  #confirm .src { font-size: 26px; color: var(--ink-muted); margin-top: 10px; }
+  #confirm hr { border: 0; height: 2px; background: var(--cream-line); margin: 26px 0 20px; }
+  #confirm .total { display: flex; justify-content: space-between; align-items: baseline; font-size: 36px; font-weight: 600; }
+  #confirm .total .amt { font-size: 62px; }
+  #match { display: inline-flex; align-items: center; gap: 12px; margin-top: 24px; padding: 10px 22px; border-radius: 999px; background: rgba(69,181,172,0.18); color: var(--teal-dk); font-size: 28px; font-weight: 600; }
+  #approve { position: relative; margin-top: 26px; height: 96px; border-radius: 18px; background: var(--navy); color: var(--cream); display: flex; align-items: center; justify-content: center; gap: 18px; font-size: 34px; font-weight: 600; overflow: hidden; }
+  #approve .ok { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: 16px; background: var(--teal-dk); color: var(--cream); opacity: 0; }
+  #s4 .side { top: 190px; left: 1080px; width: 712px; }
+  #steps { position: absolute; left: 1080px; top: 470px; width: 712px; display: flex; flex-direction: column; gap: 22px; }
+  .step { display: flex; align-items: center; gap: 18px; font-size: 32px; color: var(--cream); }
+  .step svg { flex: none; width: 44px; height: 44px; }
+  .step.final { margin-top: 10px; padding: 22px 26px; border-radius: 18px; background: var(--card); border: 2px solid var(--teal); }
+  .step.final b { font-family: 'Space Grotesk', sans-serif; font-weight: 700; color: var(--teal); }
+  .step small { display: block; font-size: 26px; color: var(--muted); margin-top: 4px; }
+
+  /* ---------- scene 5: proof ---------- */
+  #s5 .label { position: absolute; left: 128px; top: 230px; font-size: 26px; color: var(--amber); }
+  .stat { position: absolute; top: 300px; width: 812px; height: 420px; padding: 56px; background: var(--card); border-radius: 24px; border-top: 6px solid var(--teal); }
+  .stat .num { font-family: 'Space Grotesk', sans-serif; font-weight: 600; font-size: 176px; line-height: 1; color: var(--teal); white-space: nowrap; }
+  .stat .lbl { font-size: 38px; line-height: 1.3; margin-top: 34px; color: var(--cream); }
+  #stat-a { left: 128px; } #stat-b { left: 980px; }
+  #s5 .src { position: absolute; left: 128px; top: 770px; font-size: 24px; color: var(--muted); }
+
+  /* ---------- scene 6: end card ---------- */
+  #amber { position: absolute; inset: 0; background: var(--amber); transform-origin: 0 50%; }
+  #s6 .content { position: absolute; inset: 0; color: var(--navy); }
+  #s6 .mono { position: absolute; left: 128px; top: 230px; font-size: 26px; color: var(--navy); }
+  #end-mark { position: absolute; left: 1250px; top: 280px; width: 540px; height: 424px; }
+  #s6 h1 { position: absolute; left: 128px; top: 290px; width: 1060px; margin: 0; font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: 128px; line-height: 1.02; }
+  #s6 .sub { position: absolute; left: 128px; top: 780px; font-family: 'Space Grotesk', sans-serif; font-size: 46px; font-weight: 500; }
+  #s6 .foot { position: absolute; left: 128px; bottom: 64px; font-size: 24px; color: #2A2416; }
+</style>
+</head>
+<body>
+<div id="root" data-composition-id="main" data-start="0" data-width="1920" data-height="1080" data-duration="24.5" data-fps="30">
+
+  <!-- background: untimed, full-bleed -->
+  <div class="bg" id="bg">
+    <div class="grid"></div>
+    <div class="glow" id="glow-a"></div>
+    <div class="glow" id="glow-t"></div>
+  </div>
+
+  <!-- persistent chrome: brand + disclaimer -->
+  <div id="chrome" class="clip" data-start="0" data-duration="20.2" data-track-index="1">
+    <div class="brand" id="brand">
+      <svg class="brand-mark" viewBox="0 0 612 480" aria-hidden="true"><g fill="#E8A33D"><rect x="0" y="210" width="12" height="60" rx="6" opacity="0.35"/><rect x="24" y="180" width="12" height="120" rx="6" opacity="0.45"/><rect x="48" y="140" width="12" height="200" rx="6" opacity="0.55"/><rect x="72" y="170" width="12" height="140" rx="6" opacity="0.6"/><rect x="96" y="110" width="12" height="260" rx="6" opacity="0.7"/><rect x="120" y="150" width="12" height="180" rx="6" opacity="0.75"/><rect x="144" y="80" width="12" height="320" rx="6" opacity="0.85"/><rect x="168" y="130" width="12" height="220" rx="6" opacity="0.9"/><rect x="192" y="165" width="12" height="150" rx="6"/><rect x="216" y="120" width="12" height="240" rx="6"/><rect x="240" y="185" width="12" height="110" rx="6"/><rect x="264" y="155" width="12" height="170" rx="6"/><rect x="288" y="200" width="12" height="80" rx="6"/><rect x="312" y="180" width="12" height="120" rx="6"/><rect x="336" y="215" width="12" height="50" rx="6"/></g><line x1="364" y1="240" x2="450" y2="240" stroke="#45B5AC" stroke-width="10" stroke-linecap="round"/><circle cx="530" cy="240" r="76" fill="#1A2536" stroke="#45B5AC" stroke-width="10"/><path d="M494 242 L520 268 L568 214" fill="none" stroke="#45B5AC" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <div class="brand-name">SaySo</div>
+    </div>
+    <div class="disclaimer mono" id="disclaimer">Simulated bank · synthetic data</div>
+  </div>
+
+  <!-- step rail (deck footer), scenes 2-4 -->
+  <div id="rail-clip" class="clip" data-start="4.23" data-duration="12.63" data-track-index="2">
+    <div id="rail">
+      <div class="chip" id="c1">1 Extract</div>
+      <div class="chip" id="c2">2 Resolve</div>
+      <div class="chip" id="c3">3 Clarify</div>
+      <div class="chip" id="c4">4 Freeze</div>
+      <div class="chip" id="c5">5 Validate</div>
+      <div class="chip" id="c6">6 Approve</div>
+    </div>
+  </div>
+
+  <!-- scene 1: you say -->
+  <div id="s1" class="clip" data-start="0" data-duration="4.6" data-track-index="3">
+    <div id="wave"></div>
+    <div id="s1-label" class="mono">You say</div>
+  </div>
+
+  <!-- the spoken sentence, carried from scene 1 into scene 2 -->
+  <div id="sentence-clip" class="clip" data-start="0" data-duration="8.96" data-track-index="4">
+    <div id="sentence"><span class="w">“Pay</span> <span class="w">my</span> <span class="w"><span class="hl" id="hl1">card balance</span></span> <span class="w">from</span> <span class="w">my</span> <span class="w">current</span> <span class="w">account</span> <span class="w">and</span> <span class="w">send</span> <span class="w"><span class="hl" id="hl2">15</span></span> <span class="w">to</span> <span class="w"><span class="hl" id="hl3">John</span>”</span><span id="caret"></span></div>
+  </div>
+
+  <!-- scene 2: AI reads, code decides -->
+  <div id="s2" class="clip" data-start="4.23" data-duration="4.73" data-track-index="5">
+    <div class="label mono" id="s2-label">AI copies words · Code makes them exact</div>
+    <div class="head display" id="s2-head">AI copies your words. <em>Code turns them into money.</em></div>
+    <div id="rows">
+      <div class="row" id="r1"><div class="q">“card balance”</div><i class="arrow"></i><div class="r"><span class="v">SGD 642.30</span><span class="n">the bank’s figure, not the model’s</span></div></div>
+      <div class="row" id="r2"><div class="q">“15”</div><i class="arrow"></i><div class="r"><span class="v">SGD 15.00</span><span class="n">exact two-decimal money</span></div></div>
+      <div class="row ask" id="r3"><div class="q">“John”</div><i class="arrow"></i><div class="r"><span class="v">ASK · which John?</span><span class="n">two saved payees match</span></div></div>
+    </div>
+  </div>
+
+  <!-- scene 3: clarify -->
+  <div id="s3" class="clip" data-start="8.96" data-duration="3.69" data-track-index="6">
+    <div class="ui-card" id="ask-card">
+      <div class="mono">SaySo asks</div>
+      <div class="qn">Which “John” do you mean?</div>
+      <div class="opt" id="opt1"><i class="fill"></i><i class="tick"></i><svg class="tick-on" viewBox="0 0 40 40"><circle cx="20" cy="20" r="20" fill="#1C6E68"/><path d="M11 20.5 L17.5 27 L29 14" fill="none" stroke="#F5F2EB" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg><span><b>John Doe</b> · account ending 4521</span></div>
+      <div class="opt" id="opt2"><i class="tick"></i><span><b>John Tan</b> · account ending 8892</span></div>
+    </div>
+    <div class="side" id="s3-side">
+      <div class="mono">Step 3 · Clarify</div>
+      <div class="big">One short question instead of a guess.</div>
+    </div>
+    <svg class="cursor" id="cur1" viewBox="0 0 46 56"><path d="M4 3 L4 45 L15 34 L23 52 L31 48 L23 31 L39 31 Z" fill="#F5F2EB" stroke="#101826" stroke-width="3" stroke-linejoin="round"/></svg>
+  </div>
+
+  <!-- scene 4: approve -->
+  <div id="s4" class="clip" data-start="12.65" data-duration="4.21" data-track-index="7">
+    <div class="ui-card" id="confirm">
+      <div class="mono">Confirm 2 payments</div>
+      <div class="leg"><span>Credit card ·4242</span><span class="amt">SGD 642.30</span></div>
+      <div class="leg"><span>John Doe ·4521</span><span class="amt">SGD 15.00</span></div>
+      <div class="src">Both from Current ·5678</div>
+      <hr />
+      <div class="total"><span>Total debit</span><span class="amt">SGD 657.30</span></div>
+      <div id="match"><svg width="30" height="30" viewBox="0 0 40 40"><circle cx="20" cy="20" r="20" fill="#1C6E68"/><path d="M11 20.5 L17.5 27 L29 14" fill="none" stroke="#F5F2EB" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg>Independent check: MATCH</div>
+      <div id="approve" data-layout-allow-overlap data-layout-allow-occlusion>
+        <svg width="40" height="40" viewBox="0 0 40 40" aria-hidden="true"><g fill="none" stroke="#F5F2EB" stroke-width="2.6" stroke-linecap="round"><path d="M10 15 A11 11 0 0 1 30 15"/><path d="M8 22 A12 12 0 0 1 20 9"/><path d="M14 30 C17 26 16 20 20 19 C24 19 25 24 24 28"/><path d="M19 34 C22 30 21 25 21 23"/><path d="M28 30 C29 27 30 23 29 20"/></g></svg>
+        <span id="approve-label">Approve with Touch ID</span>
+        <div class="ok"><svg width="40" height="40" viewBox="0 0 40 40"><path d="M9 20.5 L17 28.5 L31 13" fill="none" stroke="#F5F2EB" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Approved</span></div>
+      </div>
+    </div>
+    <div class="side" id="s4-side">
+      <div class="mono">Step 6 · You approve</div>
+      <div class="big">You sign exactly what you see.</div>
+    </div>
+    <div id="steps">
+      <div class="step" id="st1"><svg viewBox="0 0 44 44"><circle cx="22" cy="22" r="20" fill="none" stroke="#45B5AC" stroke-width="3"/><path d="M13 22.5 L19.5 29 L31 16" fill="none" stroke="#45B5AC" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Passkey signs these exact bytes</span></div>
+      <div class="step" id="st2"><svg viewBox="0 0 44 44"><circle cx="22" cy="22" r="20" fill="none" stroke="#45B5AC" stroke-width="3"/><path d="M13 22.5 L19.5 29 L31 16" fill="none" stroke="#45B5AC" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg><span>One-time code, as it’s over SGD 500</span></div>
+      <div class="step final" id="st3"><svg viewBox="0 0 44 44"><circle cx="22" cy="22" r="22" fill="#45B5AC"/><path d="M13 22.5 L19.5 29 L31 16" fill="none" stroke="#101826" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/></svg><span><b>Executed</b><small>Current 3,500.00 → 2,842.70</small></span></div>
+    </div>
+    <svg class="cursor" id="cur2" viewBox="0 0 46 56"><path d="M4 3 L4 45 L15 34 L23 52 L31 48 L23 31 L39 31 Z" fill="#F5F2EB" stroke="#101826" stroke-width="3" stroke-linejoin="round"/></svg>
+  </div>
+
+  <!-- scene 5: proof -->
+  <div id="s5" class="clip" data-start="16.86" data-duration="3.55" data-track-index="8">
+    <div class="label mono" id="s5-label">Measured on live runs</div>
+    <div class="stat" id="stat-a"><div class="num"><span id="n-a">0</span> / 30</div><div class="lbl">wrong drafts reached the approval screen</div></div>
+    <div class="stat" id="stat-b"><div class="num"><span id="n-b">0</span> / 46</div><div class="lbl">Rogue Agent Mode attacks held</div></div>
+  </div>
+
+  <!-- scene 6: say-so -->
+  <div id="s6" class="clip" data-start="20.02" data-duration="4.48" data-track-index="9">
+    <div id="amber"></div>
+    <div class="content" id="s6-content">
+      <div class="mono" id="s6-label">SaySo</div>
+      <svg id="end-mark" viewBox="0 0 612 480" aria-label="A voice waveform that ends in a check mark"><g fill="#101826" id="end-bars"><rect x="0" y="210" width="12" height="60" rx="6" data-o="0.35"/><rect x="24" y="180" width="12" height="120" rx="6" data-o="0.45"/><rect x="48" y="140" width="12" height="200" rx="6" data-o="0.55"/><rect x="72" y="170" width="12" height="140" rx="6" data-o="0.6"/><rect x="96" y="110" width="12" height="260" rx="6" data-o="0.7"/><rect x="120" y="150" width="12" height="180" rx="6" data-o="0.75"/><rect x="144" y="80" width="12" height="320" rx="6" data-o="0.85"/><rect x="168" y="130" width="12" height="220" rx="6" data-o="0.9"/><rect x="192" y="165" width="12" height="150" rx="6"/><rect x="216" y="120" width="12" height="240" rx="6"/><rect x="240" y="185" width="12" height="110" rx="6"/><rect x="264" y="155" width="12" height="170" rx="6"/><rect x="288" y="200" width="12" height="80" rx="6"/><rect x="312" y="180" width="12" height="120" rx="6"/><rect x="336" y="215" width="12" height="50" rx="6"/></g><line id="end-line" x1="364" y1="240" x2="450" y2="240" stroke="#101826" stroke-width="8" stroke-linecap="round"/><circle id="end-circle" cx="530" cy="240" r="76" fill="#101826"/><path id="end-check" d="M494 242 L520 268 L568 214" fill="none" stroke="#E8A33D" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <h1 id="end-head">Nothing moves without your say-so.</h1>
+      <div class="sub" id="end-sub">AI reads your words. Code decides. Your passkey approves.</div>
+      <div class="foot" id="end-foot">Hackathon prototype on a simulated bank with synthetic data. Not connected to DBS, PayNow, SGX or any real KYC or sanctions service.</div>
+    </div>
+  </div>
+
+  <!-- audio -->
+  <audio id="music" src="assets/music/happy-beats-business-moves-vol-11-by-ende-dot-app.mp3" data-start="0" data-duration="24.5" data-track-index="10" data-volume="0.34"
+    data-automation='{"version":1,"lanes":[{"target":"volume","points":[{"t":0,"v":0},{"t":0.4,"v":1},{"t":23.0,"v":1},{"t":24.45,"v":0}]}]}'></audio>
+  <audio id="sfx-key1" src="assets/sfx/keyboard/keypress-003.wav" data-start="0.55" data-duration="0.25" data-track-index="11" data-volume="0.35"></audio>
+  <audio id="sfx-key2" src="assets/sfx/keyboard/keypress-012.wav" data-start="1.06" data-duration="0.25" data-track-index="12" data-volume="0.3"></audio>
+  <audio id="sfx-key3" src="assets/sfx/keyboard/keypress-007.wav" data-start="1.57" data-duration="0.25" data-track-index="13" data-volume="0.3"></audio>
+  <audio id="sfx-key4" src="assets/sfx/keyboard/keypress-018.wav" data-start="2.08" data-duration="0.25" data-track-index="14" data-volume="0.3"></audio>
+  <audio id="sfx-key5" src="assets/sfx/keyboard/keypress-024.wav" data-start="2.59" data-duration="0.25" data-track-index="15" data-volume="0.35"></audio>
+  <audio id="sfx-row1" src="assets/sfx/interface/drop_002.ogg" data-start="5.28" data-duration="0.2" data-track-index="16" data-volume="0.55"></audio>
+  <audio id="sfx-row2" src="assets/sfx/interface/drop_002.ogg" data-start="6.34" data-duration="0.2" data-track-index="17" data-volume="0.55"></audio>
+  <audio id="sfx-row3" src="assets/sfx/interface/drop_001.ogg" data-start="7.38" data-duration="0.12" data-track-index="18" data-volume="0.6"></audio>
+  <audio id="sfx-card1" src="assets/sfx/impact/impactSoft_medium_004.ogg" data-start="8.96" data-duration="0.15" data-track-index="19" data-volume="0.55"></audio>
+  <audio id="sfx-tap" src="assets/sfx/ui/click2.ogg" data-start="10.54" data-duration="0.06" data-track-index="20" data-volume="0.7"></audio>
+  <audio id="sfx-card2" src="assets/sfx/impact/impactSoft_medium_004.ogg" data-start="12.65" data-duration="0.15" data-track-index="21" data-volume="0.55"></audio>
+  <audio id="sfx-press" src="assets/sfx/ui/click2.ogg" data-start="14.22" data-duration="0.06" data-track-index="22" data-volume="0.7"></audio>
+  <audio id="sfx-exec" src="assets/sfx/impact/impactBell_heavy_000.ogg" data-start="15.49" data-duration="1.3" data-track-index="23" data-volume="0.5"></audio>
+  <audio id="sfx-stats" src="assets/sfx/impact/impactSoft_medium_001.ogg" data-start="18.10" data-duration="0.18" data-track-index="24" data-volume="0.6"></audio>
+  <audio id="sfx-end" src="assets/sfx/interface/bong_001.ogg" data-start="20.02" data-duration="0.12" data-track-index="25" data-volume="0.65"></audio>
+  <audio id="sfx-end2" src="assets/sfx/impact/impactSoft_medium_001.ogg" data-start="20.54" data-duration="0.18" data-track-index="26" data-volume="0.5"></audio>
+</div>
+
+<script>
+(function () {
+  // Waveform bars for the hook, from the deck's title-slide mark (bar heights, 0-320)
+  var H = [60, 120, 200, 140, 260, 180, 320, 220, 150, 240, 110, 170, 80, 120, 50];
+  var wave = document.getElementById("wave");
+  H.forEach(function (h, i) {
+    var b = document.createElement("div");
+    b.className = "bar";
+    b.style.height = h + "px";
+    b.style.opacity = String(0.35 + 0.65 * Math.min(1, i / 8));
+    b.innerHTML = "<i></i>";
+    wave.appendChild(b);
+  });
+  var bars = wave.querySelectorAll(".bar");
+  var barInner = wave.querySelectorAll(".bar i");
+
+  var tl = gsap.timeline({ paused: true });
+  var E = "power3.out";
+
+  // ---------- scene 1: you say (0 - 4.23) ----------
+  tl.fromTo("#brand", { opacity: 0, y: -16 }, { opacity: 1, y: 0, duration: 0.5, ease: E }, 0.1);
+  tl.fromTo("#disclaimer", { opacity: 0 }, { opacity: 1, duration: 0.5, ease: "power1.out" }, 0.3);
+  tl.fromTo(bars, { scaleY: 0.04 }, { scaleY: 1, duration: 0.7, ease: "back.out(1.6)", stagger: 0.035 }, 0.05);
+  tl.fromTo("#s1-label", { opacity: 0, x: -24 }, { opacity: 1, x: 0, duration: 0.4, ease: E }, 0.35);
+  var words = document.querySelectorAll("#sentence .w");
+  words.forEach(function (w, i) {
+    tl.fromTo(w, { opacity: 0, y: 14 }, { opacity: 1, y: 0, duration: 0.22, ease: "power2.out" }, 0.55 + i * 0.17);
+  });
+  // caret: rides the end of the sentence, blinks deterministically, then leaves
+  tl.fromTo("#caret", { opacity: 0 }, { opacity: 1, duration: 0.05 }, 2.78);
+  for (var k = 0; k < 2; k++) {
+    tl.to("#caret", { opacity: 0, duration: 0.01 }, 3.1 + k * 0.5);
+    tl.to("#caret", { opacity: 1, duration: 0.01 }, 3.35 + k * 0.5);
+  }
+  tl.to("#caret", { opacity: 0, duration: 0.01 }, 4.05);
+  // exit scene 1 visuals
+  tl.to("#wave", { opacity: 0, y: -40, duration: 0.4, ease: "power2.in" }, 3.95);
+  tl.to("#s1-label", { opacity: 0, duration: 0.3 }, 3.95);
+
+  // ---------- scene 2: AI reads, code decides (4.23 - 8.96) ----------
+  // the sentence rises and settles as a quote
+  tl.fromTo("#sentence", { y: 0, scale: 1 }, { y: -350, scale: 0.6, duration: 0.7, ease: "power3.inOut" }, 4.15);
+  tl.fromTo("#s2-label", { opacity: 0, y: 12 }, { opacity: 1, y: 0, duration: 0.4, ease: E }, 4.35);
+  tl.fromTo("#s2-head", { opacity: 0, y: 30 }, { opacity: 1, y: 0, duration: 0.55, ease: E }, 4.45);
+  tl.fromTo("#c1", { backgroundColor: "rgba(245,242,235,0)", color: "#8C98AA", borderColor: "#3A4A63" }, { backgroundColor: "rgba(245,242,235,1)", color: "#101826", borderColor: "#F5F2EB", duration: 0.3 }, 4.75);
+  tl.fromTo("#rail", { opacity: 0, y: 20 }, { opacity: 1, y: 0, duration: 0.45, ease: E }, 4.3);
+  // beat-grid: highlight + row pairs on every other beat: 5.28, 6.34, 7.38
+  [["#hl1", "#r1", 5.28], ["#hl2", "#r2", 6.34], ["#hl3", "#r3", 7.38]].forEach(function (p) {
+    tl.fromTo(p[0], { backgroundSize: "0% 100%" }, { backgroundSize: "100% 100%", duration: 0.35, ease: "power2.out" }, p[2] - 0.2);
+    tl.fromTo(p[1], { opacity: 0, x: -60 }, { opacity: 1, x: 0, duration: 0.45, ease: E }, p[2] - 0.05);
+    tl.fromTo(p[1] + " .arrow", { scaleX: 0 }, { scaleX: 1, duration: 0.35, ease: "power2.out" }, p[2] + 0.1);
+    tl.fromTo(p[1] + " .r", { opacity: 0, x: -20 }, { opacity: 1, x: 0, duration: 0.35, ease: E }, p[2] + 0.2);
+  });
+  tl.to("#c1", { backgroundColor: "rgba(245,242,235,0)", color: "#45B5AC", borderColor: "#45B5AC", duration: 0.3 }, 5.8);
+  tl.fromTo("#c2", { backgroundColor: "rgba(245,242,235,0)", color: "#8C98AA", borderColor: "#3A4A63" }, { backgroundColor: "rgba(245,242,235,1)", color: "#101826", borderColor: "#F5F2EB", duration: 0.3 }, 5.8);
+  // exit scene 2
+  tl.to(["#s2-label", "#s2-head", "#rows"], { opacity: 0, x: -80, duration: 0.35, ease: "power2.in", stagger: 0.04 }, 8.55);
+  tl.to("#sentence", { opacity: 0, x: -80, duration: 0.35, ease: "power2.in" }, 8.55);
+
+  // ---------- scene 3: clarify (8.96 - 12.65) ----------
+  tl.to("#c2", { backgroundColor: "rgba(245,242,235,0)", color: "#45B5AC", borderColor: "#45B5AC", duration: 0.3 }, 8.96);
+  tl.fromTo("#c3", { backgroundColor: "rgba(245,242,235,0)", color: "#8C98AA", borderColor: "#3A4A63" }, { backgroundColor: "rgba(245,242,235,1)", color: "#101826", borderColor: "#F5F2EB", duration: 0.3 }, 8.96);
+  // beat-locked: 8.96s
+  tl.fromTo("#ask-card", { opacity: 0, x: 120, rotation: 1.5 }, { opacity: 1, x: 0, rotation: 0, duration: 0.6, ease: "power4.out" }, 8.96);
+  tl.fromTo("#opt1", { opacity: 0, y: 20 }, { opacity: 1, y: 0, duration: 0.35, ease: E }, 9.25);
+  tl.fromTo("#opt2", { opacity: 0, y: 20 }, { opacity: 1, y: 0, duration: 0.35, ease: E }, 9.35);
+  tl.fromTo("#s3-side", { opacity: 0, x: 60 }, { opacity: 1, x: 0, duration: 0.55, ease: E }, 9.2);
+  tl.fromTo("#cur1", { x: 1560, y: 980, opacity: 0 }, { x: 1520, y: 940, opacity: 1, duration: 0.2 }, 9.55);
+  tl.to("#cur1", { x: 600, y: 520, duration: 0.75, ease: "power2.inOut" }, 9.75);
+  tl.to("#cur1", { scale: 0.86, duration: 0.08, transformOrigin: "10% 5%" }, 10.5);
+  tl.to("#cur1", { scale: 1, duration: 0.14 }, 10.6);
+  tl.fromTo("#opt1 .fill", { opacity: 0 }, { opacity: 1, duration: 0.2 }, 10.54);
+  tl.fromTo("#opt1 .tick-on", { opacity: 0, scale: 0.4 }, { opacity: 1, scale: 1, duration: 0.3, ease: "back.out(2.4)" }, 10.56);
+  tl.to("#opt2", { opacity: 0.45, duration: 0.3 }, 10.65);
+  tl.to("#cur1", { opacity: 0, duration: 0.3 }, 11.4);
+  // exit scene 3
+  tl.to(["#ask-card", "#s3-side"], { opacity: 0, x: -80, duration: 0.35, ease: "power2.in", stagger: 0.05 }, 12.25);
+
+  // ---------- scene 4: approve (12.65 - 16.86) ----------
+  tl.to("#c3", { backgroundColor: "rgba(245,242,235,0)", color: "#45B5AC", borderColor: "#45B5AC", duration: 0.3 }, 12.65);
+  tl.fromTo(["#c4", "#c5"], { color: "#8C98AA", borderColor: "#3A4A63" }, { color: "#45B5AC", borderColor: "#45B5AC", duration: 0.3, stagger: 0.25 }, 12.8);
+  tl.fromTo("#c6", { backgroundColor: "rgba(245,242,235,0)", color: "#8C98AA", borderColor: "#3A4A63" }, { backgroundColor: "rgba(245,242,235,1)", color: "#101826", borderColor: "#F5F2EB", duration: 0.3 }, 13.3);
+  // beat-locked: 12.65s
+  tl.fromTo("#confirm", { opacity: 0, y: 90 }, { opacity: 1, y: 0, duration: 0.6, ease: "power4.out" }, 12.65);
+  tl.fromTo("#s4-side", { opacity: 0, x: 60 }, { opacity: 1, x: 0, duration: 0.5, ease: E }, 12.85);
+  tl.fromTo("#match", { opacity: 0, scale: 0.6 }, { opacity: 1, scale: 1, duration: 0.4, ease: "back.out(2)" }, 13.6);
+  tl.fromTo("#cur2", { x: 1000, y: 1000, opacity: 0 }, { x: 960, y: 960, opacity: 1, duration: 0.2 }, 13.55);
+  tl.to("#cur2", { x: 560, y: 790, duration: 0.42, ease: "power2.inOut" }, 13.75);
+  tl.to("#cur2", { scale: 0.86, duration: 0.08, transformOrigin: "10% 5%" }, 14.18);
+  tl.to("#cur2", { scale: 1, duration: 0.14 }, 14.28);
+  tl.fromTo("#approve", { scale: 1 }, { scale: 0.97, duration: 0.08 }, 14.2);
+  tl.to("#approve", { scale: 1, duration: 0.2, ease: "back.out(2)" }, 14.3);
+  tl.fromTo("#approve .ok", { opacity: 0 }, { opacity: 1, duration: 0.25 }, 14.3);
+  tl.to("#approve-label", { opacity: 0, duration: 0.2 }, 14.3);
+  tl.to("#cur2", { opacity: 0, duration: 0.3 }, 14.6);
+  tl.fromTo("#st1", { opacity: 0, x: 40 }, { opacity: 1, x: 0, duration: 0.4, ease: E }, 14.4);
+  tl.fromTo("#st2", { opacity: 0, x: 40 }, { opacity: 1, x: 0, duration: 0.4, ease: E }, 14.95);
+  tl.fromTo("#st3", { opacity: 0, x: 40, scale: 0.96 }, { opacity: 1, x: 0, scale: 1, duration: 0.45, ease: "back.out(1.6)" }, 15.49);
+  tl.to("#c6", { backgroundColor: "rgba(69,181,172,1)", color: "#101826", borderColor: "#45B5AC", duration: 0.3 }, 15.49);
+  // exit scene 4
+  tl.to(["#confirm", "#s4-side", "#steps"], { opacity: 0, y: -40, duration: 0.35, ease: "power2.in", stagger: 0.04 }, 16.45);
+  tl.to("#rail", { opacity: 0, duration: 0.3 }, 16.5);
+
+  // ---------- scene 5: proof (16.86 - 20.02) ----------
+  tl.fromTo("#s5-label", { opacity: 0, y: 12 }, { opacity: 1, y: 0, duration: 0.4, ease: E }, 16.9);
+  tl.fromTo("#stat-a", { opacity: 0, y: 70 }, { opacity: 1, y: 0, duration: 0.55, ease: E }, 16.95);
+  tl.fromTo("#stat-b", { opacity: 0, y: 70 }, { opacity: 1, y: 0, duration: 0.55, ease: E }, 17.1);
+  var ctr = { b: 0 };
+  tl.fromTo(ctr, { b: 0 }, { b: 46, duration: 1.0, ease: "power2.out", onUpdate: function () { document.getElementById("n-b").textContent = String(Math.round(ctr.b)); } }, 17.15);
+  tl.fromTo("#stat-a .num, #stat-b .num", { scale: 1 }, { scale: 1.03, duration: 0.12, yoyo: true, repeat: 1, transformOrigin: "0% 50%" }, 18.1);
+
+  // ---------- scene 6: say-so (20.02 - 24.5) ----------
+  // beat-locked: 20.02s (amber wipe)
+  tl.fromTo("#amber", { scaleX: 0 }, { scaleX: 1, duration: 0.5, ease: "power4.inOut" }, 19.9);
+  tl.fromTo("#s6-label", { opacity: 0, y: 12 }, { opacity: 1, y: 0, duration: 0.4, ease: E }, 20.45);
+  tl.fromTo("#end-bars rect", { scaleY: 0.05, opacity: 0, transformOrigin: "50% 50%" }, { scaleY: 1, opacity: function (i, el) { return el.getAttribute("data-o") || 1; }, duration: 0.5, ease: "back.out(1.6)", stagger: 0.025 }, 20.45);
+  tl.fromTo("#end-line", { opacity: 0 }, { opacity: 1, duration: 0.2 }, 20.9);
+  tl.fromTo("#end-circle", { scale: 0, transformOrigin: "50% 50%" }, { scale: 1, duration: 0.4, ease: "back.out(2)" }, 20.95);
+  tl.fromTo("#end-check", { strokeDasharray: 120, strokeDashoffset: 120 }, { strokeDashoffset: 0, duration: 0.35, ease: "power2.out" }, 21.15);
+  tl.fromTo("#end-head", { opacity: 0, y: 50 }, { opacity: 1, y: 0, duration: 0.6, ease: E }, 20.5);
+  tl.fromTo("#end-sub", { opacity: 0, y: 24 }, { opacity: 1, y: 0, duration: 0.5, ease: E }, 21.59);
+  tl.fromTo("#end-foot", { opacity: 0 }, { opacity: 1, duration: 0.5 }, 21.9);
+
+  // ---------- audio-reactive (subtle): RMS breathes the glows and the hook waveform ----------
+  var A = window.AUDIO_DATA, ga = document.getElementById("glow-a"), gt = document.getElementById("glow-t");
+  var W = [0.6, 0.9, 1.0, 0.75, 1.0, 0.85, 1.0, 0.9, 0.7, 1.0, 0.6, 0.8, 0.5, 0.7, 0.4];
+  for (var f = 0; f < A.totalFrames; f++) {
+    tl.call((function (rms, bass, t) {
+      return function () {
+        ga.style.opacity = String(0.75 + 0.35 * rms);
+        gt.style.opacity = String(0.7 + 0.35 * bass);
+        ga.style.transform = "scale(" + (1 + 0.04 * rms) + ")";
+        if (t < 4.6) {
+          for (var j = 0; j < barInner.length; j++) {
+            barInner[j].style.transform = "scaleY(" + (0.78 + 0.32 * rms * W[j]) + ")";
+          }
+        }
+      };
+    })(A.rms[f], A.bass[f], f / A.fps), [], f / A.fps);
+  }
+
+  window.__timelines["main"] = tl;
+})();
+</script>
+</body>
+</html>

@@ -7,6 +7,7 @@
 | `SUBMISSION.md` | Hackathon submission fields: title, blurb, description, measured value, CodeBuddy use, mocks, limitations, pilot path |
 | `DEMO_SCRIPT.md` | 5–8 minute demo shot list with exact utterances, setup and fallback lines |
 | `JUDGE_QA.md` | Likely judge questions with short, evidence-backed answers |
+| `launch/` | 24-second launch video, poster, scene stills, 16:9 covers, storyboard and Hyperframes source, with credits (see `launch/README.md`) |
 | `cover/` | 16:9 cover image (SVG source and PNG exports; see `cover/README.md`) |
 | `evidence/` | Captured outputs from real runs (see `evidence/README.md`) |
 

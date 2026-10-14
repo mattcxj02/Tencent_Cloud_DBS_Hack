@@ -1,0 +1,1 @@
+Introducing SaySo: say your payments in your own words. Two AI models read them, plain code decides, and nothing moves without your passkey.

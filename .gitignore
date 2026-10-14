@@ -36,3 +36,10 @@ smoke_*.wav
 *~
 .DS_Store
 *.tsbuildinfo
+
+# Local reference material (hackathon brief, decks) kept out of the repo
+references/
+
+# Launch video: Hyperframes cache, and the bundled music track (licence not yet verified for redistribution)
+.hyperframes/
+docs/launch/composition/assets/music/*.mp3
