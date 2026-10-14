@@ -1,6 +1,13 @@
 # DCTA Makefile — common development targets
-.PHONY: eval-fake operator reset-db upgrade-db test lint web-build dev stop seed eval smoke-llm smoke-asr smoke-langfuse smoke-validate smoke-telemetry smoke-extract smoke-voice \
+.PHONY: env eval-fake operator reset-db upgrade-db test lint web-build dev stop seed eval smoke-llm smoke-asr smoke-langfuse smoke-validate smoke-telemetry smoke-extract smoke-voice \
        compose-build compose-up compose-down isolation-probe enroll-code
+
+# ── Setup ──
+
+# Create .env from .env.example, generate service secrets, ask for API keys.
+# Safe to rerun: existing values are kept.
+env:
+	python3 scripts/setup_env.py
 
 # ── Development checks ──
 
@@ -52,9 +59,9 @@ eval-fake:
 	uv run python -m evals.run --fake
 
 # Simulated phone for step-up codes: make operator ARGS='list' or ARGS='code <authz_id>'
-# (OPERATOR_TOKEN must be exported in your shell).
+# Uses an exported OPERATOR_TOKEN if set, otherwise only that one value from .env.
 operator:
-	uv run python scripts/operator_console.py $(ARGS)
+	@OPERATOR_TOKEN="$${OPERATOR_TOKEN:-$$(sed -n 's/^OPERATOR_TOKEN=//p' .env 2>/dev/null)}" uv run python scripts/operator_console.py $(ARGS)
 
 # ── Smoke checks ──
 

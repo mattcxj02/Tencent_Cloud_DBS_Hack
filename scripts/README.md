@@ -1,5 +1,7 @@
 # scripts
 
+Setup: `make env` runs `setup_env.py`, which creates `.env` from `.env.example` (mode 600), generates `VALIDATOR_SERVICE_TOKEN`, `OPERATOR_TOKEN`, `STEP_UP_SECRET` and `GATEWAY_DELEGATION_SECRET` when they are empty or shorter than 32 characters, and asks for each provider credential that is still a placeholder (hidden input, Enter to skip). It keeps existing values, never prints them, and uses only the standard library. `--no-prompt` generates the secrets without asking.
+
 Live smoke checks against real external services. They read credentials from `.env` at runtime and never print secret values.
 
 | Command | Checks |

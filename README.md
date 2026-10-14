@@ -70,59 +70,81 @@ Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) (diagrams, plus an "As bui
 
 ## Quick start (local demo)
 
-**Prerequisites**
+**You need**
 - A device with a platform passkey: a Mac with Touch ID (Chrome or Safari) or a Windows 10/11 PC with Windows Hello (Chrome or Edge); a USB security key also works. Passkeys work on `http://localhost` in a real browser (not an editor's built-in preview); a phone needs an HTTPS origin.
-- Python 3.12, [uv](https://docs.astral.sh/uv/), Node.js (current LTS) with npm, and Docker Desktop (for the container stack only).
-- Credentials: a TokenHub key with `hy3` enabled, a DeepSeek API key, a Tencent TRTC application (**SDKAppID + SDKSecretKey**, not the cloud SecretId/SecretKey) and a Langfuse Cloud project.
+- Python 3.12, [uv](https://docs.astral.sh/uv/), Node.js 20 or newer with npm, and `make`. macOS or Linux for the dev commands. Docker Desktop only for the container stack.
+- Four accounts (keys are asked for in step 2; you can skip any and add it later):
 
-**1. Install**
+| Credential | Where to get it | Used by |
+|---|---|---|
+| `tokenhub_key` | Tencent Cloud TokenHub, with model `hy3` enabled | Extractor (agent) |
+| `deepseek_key` | [DeepSeek platform](https://platform.deepseek.com/) API key | Validator |
+| `SDKAppID`, `SDKSecretKey` | A Tencent [TRTC](https://trtc.io/) application. Use the app's **SDKAppID + SDKSecretKey**, not the cloud SecretId/SecretKey | Voice (gateway) |
+| `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY` | A [Langfuse Cloud](https://cloud.langfuse.com/) project (US region) | Tracing |
+
+**1. Clone and install**
 
 ```bash
+git clone https://github.com/mattcxj02/Tencent_Cloud_DBS_Hack.git
+cd Tencent_Cloud_DBS_Hack
 uv sync --extra dev
-cd web && npm install && cd ..
+(cd web && npm install)
 ```
 
-**2. Configure `.env`** (copy [`.env.example`](.env.example); never commit `.env`). Variable names:
+**2. Create `.env`**
+
+```bash
+make env
+```
+
+This copies [`.env.example`](.env.example) to `.env` (git-ignored, file mode 600) and:
+- **generates the service secrets** with Python's `secrets` module: `VALIDATOR_SERVICE_TOKEN`, `OPERATOR_TOKEN`, `STEP_UP_SECRET` and `GATEWAY_DELEGATION_SECRET` (64 random characters each);
+- **asks for the six credentials above**, with hidden input. Press Enter to skip one and fill it in later.
+
+It never prints a value and keeps anything already set, so rerun `make env` at any time to add a skipped key. Prefer no prompts? `python3 scripts/setup_env.py --no-prompt` generates only the secrets; then edit `.env` by hand.
+
+<details>
+<summary>What else is in <code>.env</code> (all optional)</summary>
 
 | Purpose | Variables |
 |---|---|
-| Models | `tokenhub_key`, `deepseek_key`. Optional: `EXTRACT_PROVIDER`, `EXTRACT_MODEL`, `VALIDATE_PROVIDER`, `VALIDATE_MODEL`, `EXTRACT_MAX_TOKENS`, `VALIDATE_MAX_TOKENS`, `EXTRACT_TIMEOUT_SECONDS`, `EXTRACT_MAX_RETRIES`, `AGENT_TIMEOUT_SECONDS`, `VALIDATE_TIMEOUT_SECONDS`, `VALIDATOR_CLIENT_TIMEOUT_SECONDS` |
-| Voice (gateway only) | `SDKAppID`, `SDKSecretKey`, `TRTC_ASR_HOST` |
-| Observability | `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_BASE_URL` |
-| Service secrets (random, at least 32 characters each) | `VALIDATOR_SERVICE_TOKEN` (**required**: the validator refuses every request without it), `OPERATOR_TOKEN` and `STEP_UP_SECRET` (step-up demo), `GATEWAY_DELEGATION_SECRET` (optional; if empty, a random secret is used per process) |
-| Passkeys | `WEBAUTHN_RP_ID=localhost`, `WEBAUTHN_RP_ORIGIN=http://localhost:5173` (defaults) |
+| Model choice and timeouts | `EXTRACT_PROVIDER`, `EXTRACT_MODEL`, `EXTRACT_MAX_TOKENS`, `EXTRACT_TIMEOUT_SECONDS`, `EXTRACT_MAX_RETRIES`, `EXTRACT_REASONING_EFFORT`, `VALIDATE_PROVIDER`, `VALIDATE_MODEL`, `VALIDATE_MAX_TOKENS`, `AGENT_TIMEOUT_SECONDS`, `DRAFT_TIMEOUT_SECONDS`, `VALIDATE_TIMEOUT_SECONDS`, `VALIDATOR_CLIENT_TIMEOUT_SECONDS` |
+| Voice and tracing endpoints | `TRTC_ASR_HOST`, `LANGFUSE_BASE_URL` |
+| Passkeys | `WEBAUTHN_RP_ID=localhost`, `WEBAUTHN_RP_ORIGIN=http://localhost:5173` |
+| Prototype limits | `MANDATE_PER_LEG`, `MANDATE_DAILY`, `RISK_THRESHOLD`, `COOLING_HOURS`, `NONCE_TTL_SECONDS` |
 
-Generate each random secret separately:
+The defaults in `.env.example` are the ones used for the demo. Notes:
+- `VALIDATOR_SERVICE_TOKEN` is shared by the gateway and validator only, never the agent. Restart both after changing it; restart the agent after changing its model or timeout settings.
+- `GET http://localhost:8002/api/ready` checks the validator token and the agent's model configuration without calling any model; `/api/health` reports liveness. A missing or mismatched token fails drafting with a stable 503 before any extractor call.
+- If `OPERATOR_TOKEN` or `STEP_UP_SECRET` is missing, the simulated SMS channel is disabled or codes do not survive a restart; low-risk payments still work.
+</details>
 
-```bash
-python -c 'import secrets; print(secrets.token_urlsafe(48))'
-```
-
-Use the **same `VALIDATOR_SERVICE_TOKEN` value in gateway and validator**, at least 32 characters, and never give it to the agent. Restart both services after changing it; restart the agent after changing its model or timeout settings. `GET http://localhost:8002/api/ready` checks the validator with that token and the agent's model configuration before extraction; `/api/health` reports liveness. Missing, short or mismatched tokens fail drafting with a stable 503 error and no extractor call. These checks make no provider/model calls: valid provider credentials, account access and credits still need the documented live smoke checks.
-
-Startup logs and health report missing `VALIDATOR_SERVICE_TOKEN`, `OPERATOR_TOKEN` and `STEP_UP_SECRET` by name only. Missing operator configuration disables the simulated delivery channel; a missing step-up secret uses the existing per-process fallback, so pending codes do not survive restart. Neither blocks otherwise eligible low-risk drafting. The extractor defaults to a 30-second provider request timeout and zero SDK retries, inside the gateway's 45-second wait. If increasing either setting, allow for retries, SDK backoff and gateway reads; this is not a propagated end-to-end deadline.
-
-**3. Run**
+**3. Run** (two terminals)
 
 ```bash
-make reset-db        # fresh synthetic bank (first run: `make seed` is enough). Also removes enrolled passkeys
-make upgrade-db      # after pulling changes: add new tables and aliases, keep passkeys and history
-make enroll-code     # one-time enrollment code for the demo user (valid 15 minutes)
-make dev             # agent :8001, gateway :8002, validator :8003 (local processes)
-cd web && npm run dev    # second terminal; then open http://localhost:5173
+# Terminal 1: fresh synthetic bank, a one-time enrollment code, then the three services
+make reset-db
+make enroll-code     # prints a code, valid for 15 minutes
+make dev             # agent :8001, gateway :8002, validator :8003
 ```
-
-Ctrl-C cleans up all three services and their reload workers. From another terminal, `make stop` asks this checkout's supervisor to stop its own process groups and waits for cleanup. It never uses a broad process-name kill or signals PIDs from stale files. The supervisor holds a lock and watches a stop marker in ignored `.dev/`; a second `make dev` for the same checkout is refused. These development commands require a POSIX host (macOS/Linux). Use the running UI for the demo; the obsolete `make demo` placeholder has been removed.
-
-Enter the code to enroll a passkey, then sign in with Touch ID. The demo user starts with savings 12,000.00, current 3,500.00 and joint 2,000.00. The seed also includes saved payees (two Johns, Mum, Ah Ma, Landlord Lim, a PayNow contact and a sanctioned "Northwind Trading"), billers (SP Group, Singtel), a credit card with 642.30 outstanding and mock SGX quotes (D05, O39, U11, Z74).
-
-**Step-up codes.** The simulated "SMS" is a separate operator console. Run it in a third terminal:
 
 ```bash
-export OPERATOR_TOKEN=<the same value as in .env>
-make operator ARGS='list'                    # payments waiting for a code (never shows codes)
-make operator ARGS='code <authorization_id>' # "delivers" and prints the 6-digit code
+# Terminal 2: the web app
+cd web && npm run dev
 ```
+
+Open **http://localhost:5173** (use `localhost`, not `127.0.0.1`: passkeys are bound to it), enter the enrollment code, create a passkey and sign in with Touch ID or Windows Hello.
+
+The demo user starts with savings 12,000.00, current 3,500.00 and joint 2,000.00. The seed also includes saved payees (two Johns, Mum, Ah Ma, Landlord Lim, a PayNow contact and a sanctioned "Northwind Trading"), billers (SP Group, Singtel), a credit card with 642.30 outstanding and mock SGX quotes (D05, O39, U11, Z74).
+
+**Step-up codes.** Payments over SGD 500 or with scam-like wording need a code from the simulated "SMS" channel. In a third terminal (it reads `OPERATOR_TOKEN` from `.env`):
+
+```bash
+make operator ARGS='list'                      # payments waiting for a code (never shows codes)
+make operator ARGS='code <authorization_id>'   # "delivers" and prints the 6-digit code
+```
+
+**Day to day.** Ctrl-C stops all three services; `make stop` does the same from another terminal (a second `make dev` in the same checkout is refused). After pulling changes, run `make upgrade-db` instead of `reset-db` to add new tables and keep your passkey and history. `make reset-db` starts over and removes enrolled passkeys.
 
 **Isolated containers.** `make compose-up` starts the three services in separate containers, with separate users and networks, and only the gateway holds the database volume. `make compose-down` stops them. `make isolation-probe` builds the stack, runs the in-container probes, checks that no image contains `.env`, then tears everything down. The recorded demo uses `make dev`. The browser demo has not yet been rehearsed against the container stack: it would need seeding and an enrollment code inside the gateway container.
 
