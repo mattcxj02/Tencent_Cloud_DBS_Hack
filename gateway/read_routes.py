@@ -3,6 +3,8 @@
 - ``GET /api/accounts`` → ``[{account_id, display, balance}]`` for the balances panel:
   the user's own (and joint) accounts, ``display`` = type + masked suffix
   (``Savings ••1234``), balance as a 2-dp string.
+- ``GET /api/cards`` → ``[{card_id, display, outstanding}]``: the user's own cards,
+  ``display`` = ``Card ••4242``, outstanding balance as a 2-dp string.
 - ``GET /api/conversations/{conversation_id}/evidence`` → the evidence view built by
   ``gateway/evidence_view.py`` (404 ``{"detail": "not found"}`` for unknown or other
   users' conversations). No secrets, assertions, codes or audio; text is unescaped and
@@ -41,6 +43,20 @@ def list_accounts(user: User) -> JSONResponse:
             "balance": a["balance"],
         }
         for a in accounts
+    ]
+    return JSONResponse(body, headers=_NO_STORE)
+
+
+@router.get("/api/cards", response_model=None)
+def list_cards(user: User) -> JSONResponse:
+    """The session user's cards with masked display labels and outstanding balances."""
+    body = [
+        {
+            "card_id": c["card_id"],
+            "display": f"Card ••{c['masked_suffix']}",
+            "outstanding": c["outstanding"],
+        }
+        for c in get_bank_store().get_cards(user.user_id)
     ]
     return JSONResponse(body, headers=_NO_STORE)
 

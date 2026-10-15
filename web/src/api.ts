@@ -28,6 +28,13 @@ export interface Account {
   balance: string
 }
 
+/** An owned credit card: ``display`` is "Card ••4242", ``outstanding`` a 2-dp string. */
+export interface Card {
+  card_id: string
+  display: string
+  outstanding: string
+}
+
 /** A saved payee: bank aliases are fixed, nicknames are the customer's own. */
 export interface Payee {
   payee_id: string
@@ -550,6 +557,7 @@ export const api = {
   logout: () => request<{ status: string }>('POST', '/auth/logout', { quiet401: true }),
 
   accounts: () => request<Account[]>('GET', '/accounts'),
+  cards: () => request<Card[]>('GET', '/cards'),
 
   // Payees and nicknames
   payees: () => request<Payee[]>('GET', '/payees'),

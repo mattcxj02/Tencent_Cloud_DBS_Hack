@@ -1,4 +1,5 @@
-// Persistent header: simulated-bank label, product name, signed-in user, balances and nav.
+// Persistent header: simulated-bank label, product name, signed-in user, account balances,
+// card outstanding balances and nav.
 // Gateway health is shown in the footer (ServiceStatus), away from the customer's task.
 import { useEffect, useState } from 'react'
 import { api } from '../api'
@@ -58,7 +59,7 @@ export function ServiceStatus() {
 }
 
 export function Header({ route }: { route: Route }) {
-  const { status, me, accounts, accountsError, signOut } = useSession()
+  const { status, me, accounts, accountsError, cards, signOut } = useSession()
   const signedIn = status === 'signed-in'
 
   return (
@@ -90,12 +91,17 @@ export function Header({ route }: { route: Route }) {
 
         {signedIn && (
           <div className="text-sm">
-            <p className="sr-only">Account balances</p>
+            <p className="sr-only">Balances</p>
             {accounts ? (
-              <ul className="flex flex-wrap gap-x-4 gap-y-1" aria-label="Account balances">
+              <ul className="flex flex-wrap gap-x-4 gap-y-1" aria-label="Account and card balances">
                 {accounts.map((a) => (
                   <li key={a.account_id}>
                     {a.display}: <strong className="tabular-nums">{formatMoney(a.balance)}</strong>
+                  </li>
+                ))}
+                {cards?.map((c) => (
+                  <li key={c.card_id}>
+                    {c.display} outstanding: <strong className="tabular-nums">{formatMoney(c.outstanding)}</strong>
                   </li>
                 ))}
               </ul>

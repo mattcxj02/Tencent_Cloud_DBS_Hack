@@ -3,7 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { api, ApiError, setUnauthorizedHandler } from './api'
-import type { Account, Me } from './api'
+import type { Account, Card, Me } from './api'
 import { describeCode } from './messages'
 
 const CREDENTIAL_KEY = 'dcta.credential_id'
@@ -33,6 +33,8 @@ export interface Session {
   credentialId: string | null
   accounts: Account[] | null
   accountsError: string | null
+  /** Owned cards with outstanding balances; null while loading or if unavailable. */
+  cards: Card[] | null
   notice: string | null
   refreshAccounts: () => Promise<void>
   completeSignIn: (userId: string, credentialId: string) => Promise<void>
@@ -59,15 +61,20 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [credentialId, setCredentialId] = useState<string | null>(null)
   const [accounts, setAccounts] = useState<Account[] | null>(null)
   const [accountsError, setAccountsError] = useState<string | null>(null)
+  const [cards, setCards] = useState<Card[] | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
 
   const refreshAccounts = useCallback(async () => {
+    // Card balances are refreshed with the accounts, so a card payment shows at once.
+    // They are optional: a failed card read never hides the account balances.
+    const cardsRead = api.cards().then(setCards, () => setCards(null))
     try {
       setAccounts(await api.accounts())
       setAccountsError(null)
     } catch (e) {
       setAccountsError(e instanceof ApiError ? describeCode(e.code) : 'Balances unavailable.')
     }
+    await cardsRead
   }, [])
 
   const loadMe = useCallback(
@@ -137,6 +144,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     setMe(null)
     setCredentialId(null)
     setAccounts(null)
+    setCards(null)
     setStatus('signed-out')
   }, [])
 
@@ -147,12 +155,13 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       credentialId,
       accounts,
       accountsError,
+      cards,
       notice,
       refreshAccounts,
       completeSignIn,
       signOut,
     }),
-    [status, me, credentialId, accounts, accountsError, notice, refreshAccounts, completeSignIn, signOut],
+    [status, me, credentialId, accounts, accountsError, cards, notice, refreshAccounts, completeSignIn, signOut],
   )
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>
 }

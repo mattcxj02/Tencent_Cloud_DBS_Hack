@@ -52,7 +52,7 @@ def test_me_for_another_user_shows_only_theirs(o: Orch) -> None:
     assert (body["user_id"], body["display_name"], body["credentials"]) == ("user-ana", "Ana", [])
 
 
-@pytest.mark.parametrize("path", ["/api/auth/me", "/api/accounts"])
+@pytest.mark.parametrize("path", ["/api/auth/me", "/api/accounts", "/api/cards"])
 def test_read_routes_need_a_session(o: Orch, path: str) -> None:
     app.dependency_overrides.pop(require_user_session)
     assert o.client.get(path).status_code == 401
@@ -76,6 +76,17 @@ def test_accounts_are_scoped_to_the_session_user(o: Orch) -> None:
     o.env.as_user("user-ana")
     ids = [a["account_id"] for a in o.client.get("/api/accounts").json()]
     assert ids == ["acct-ana-savings", "acct-joint-01"]
+
+
+def test_cards_show_outstanding_balance_for_the_session_user_only(o: Orch) -> None:
+    resp = o.client.get("/api/cards")
+    assert resp.status_code == 200
+    assert resp.headers["cache-control"] == "no-store"
+    assert resp.json() == [
+        {"card_id": "card-matthew-01", "display": "Card ••4242", "outstanding": "642.30"}
+    ]
+    o.env.as_user("user-ana")
+    assert [c["card_id"] for c in o.client.get("/api/cards").json()] == ["card-ana-01"]
 
 
 # ── evidence ─────────────────────────────────────────────────────────
