@@ -1,6 +1,6 @@
-# DCTA v0.3 architecture
+# SaySo (DCTA) architecture
 
-Current implementation overview, reviewed **13 October 2026** against the working tree (all six improvement-plan phases merged). These diagrams describe the code, not a claim that every dependency is configured or that the system is deployed. The final section separates verified readiness from the remaining proposed improvements.
+Current implementation overview, reviewed **15 October 2026** against the working tree. These diagrams describe the code, not a claim that every dependency is configured or that the system is deployed. The final section separates verified readiness from the remaining proposed improvements.
 
 DCTA turns a customer's words into a bundle of 1–4 simulated SGD transactions: transfers to own accounts, saved payees or PayNow contacts; bills; card payments; and mock SGX purchases. **Models prepare and check drafts. Only the gateway can execute, after the user approves the exact stored payment.** Bank data and settlement are synthetic; passkey approval uses real WebAuthn. Langfuse is the required observability backend.
 
@@ -34,7 +34,7 @@ flowchart TD
   COMMIT --> RECEIPT["8. Receipt and evidence trail"]
 ```
 
-No funds move during capture, drafting, validation or envelope creation. Each model call is awaited before the next dependent stage. A clarification starts another extraction run; the validator runs only after a draft has been frozen.
+No funds move during capture, drafting, validation or envelope creation. Each model call is awaited before the next dependent stage. A typed answer or a transcript correction starts another extraction run; a tapped choice resumes from the extraction saved with the question, so it needs no model call. The validator runs only after a draft has been frozen.
 
 ## Who owns each piece of information
 
@@ -201,7 +201,7 @@ sequenceDiagram
     G->>D: Store app question
     A-->>G: Clarification result
     G-->>B: Question to show the customer
-    Note over B,E: Customer answer creates a new revision and repeats extraction
+    Note over B,E: An answer creates a new revision. A tapped choice resumes from the saved extraction. A typed answer repeats extraction
   else All required fields resolved
     A->>G: POST /internal/drafts with untrusted proposal
     G->>G: Verify evidence, ownership and amount derivation
@@ -323,11 +323,11 @@ Signing formula: `SHA256(b"DCTA:approval:v1\x00" + canonical_bytes(SigningEnvelo
 
 Langfuse is a real required backend: correlated traces across agent/validator/gateway, separate extraction/validation generations, prompt hashes, latency, available tokens/cost, sessions and dataset experiments. End observations before human waiting and link resumed turns by session/revision. Explicit allowlists exclude secrets, raw audio, assertions and unmasked account data. Trace IDs never grant access or establish authorization.
 
-The gateway's prototype hash chain stores authoritative decisions and distinguishes untrusted agent event reports. Local audit failure rolls back payment. Langfuse outage reports degraded observability and triggers bounded sanitized export retry, but cannot relax controls or repeat a payment. The final submission must still include verified backend traces and experiment runs. A hash chain alone cannot prove resistance to privileged full rewriting or tail deletion; signed external checkpoints remain future work.
+The gateway's prototype hash chain stores authoritative decisions and distinguishes untrusted agent event reports. Local audit failure rolls back payment. Langfuse outage reports degraded observability and triggers bounded sanitized export retry, but cannot relax controls or repeat a payment. Recorded traces and experiment runs are in [UI-trace](evidence/UI-trace.md), [E2E-live](evidence/E2E-live.md) and [T-14](evidence/T-14-results.md). A hash chain alone cannot prove resistance to privileged full rewriting or tail deletion; signed external checkpoints remain future work.
 
-The MVP diagram intentionally shows no signed pack registry, agent-signed draft, gateway-signed ledger order or signed receipt. Those were unimplemented additions to the prior drawing; the full product features in the plan remain unchanged, and those recommendations are kept as optional future work.
+The diagrams intentionally show no signed pack registry, agent-signed draft, gateway-signed ledger order or signed receipt: none of these is built (see **Not built** below).
 
-## Implementation details and current limitations (12 Oct 2026)
+## Implementation details and current limitations (15 Oct 2026)
 
 Details behind the current-flow diagrams. Historical measurements below retain their original dates; they are not fresh performance guarantees. Sources: the implementation, folder READMEs and [evidence/](evidence/README.md).
 
@@ -336,6 +336,11 @@ Details behind the current-flow diagrams. Historical measurements below retain t
   - The gateway (`gateway/evidence.py`) re-checks all three conditions: the location; that the words name exactly one record; and that cited amount words mean exactly the proposed amount (`shared/amounts.py`).
   - References and double-quoted text cannot supply critical fields. An ambiguous name ("John") is refused until the user disambiguates. The source account must also come from the user's words, so "send 15 to John" without a source gets a question ([E2E](evidence/E2E-live.md)).
 - **Clarification questions are written by code** (`agent/questions.py`) from fixed text, the user's own words and gateway bank labels. They are never model text.
+  - Missing recipient and source fields across all legs are asked in one card with explicit choices and a none-of-these fallback. "Payment N:" prefixes appear only when the card covers more than one payment.
+  - A name that matches no record still gets choices: every own account and saved payee for a transfer (the records of that kind otherwise), or only the customer's own accounts when the words are the customer's own display name. A spoken name adds a pointer to "Correct this transcript".
+  - Account choices show the live available balance and flag an account that may not cover the payment. This is display only: no choice is disabled, and the gateway's funds check still applies.
+  - A tapped answer is stored as a user turn in plain words ("John Doe (account ending 4521), from savings (account ending 1234)"); each label is verbatim, so its span is exact selection evidence. It resumes from the extraction saved with the question, with no new model call ([UI-trace](evidence/UI-trace.md)).
+  - If a later typed message silently drops a payment from the saved extraction (no mention of its recipient, no change word such as "actually" or "cancel"), the agent asks "Keep it or Leave it out?" instead of guessing, so the conversation records the decision for the validator.
 - **Orchestration route.**
   1. The browser calls `POST /api/conversations/{id}/draft`.
   2. Before model work, the gateway checks token presence, authenticated validator readiness and agent configuration with bounded non-model checks. Failed checks return a stable 503 code without extraction. It then mints a 120 s delegation token for that user and conversation, with exactly the scopes `conversation:read`, `bank:read`, `draft:freeze`, `conversation:propose_question` and `audit:append_agent`.
@@ -352,7 +357,7 @@ Details behind the current-flow diagrams. Historical measurements below retain t
   | Gateway's validator client | 40 s | |
   | Extractor client (`EXTRACT_TIMEOUT_SECONDS`, `EXTRACT_MAX_RETRIES`) | 40 s per request, zero SDK retries | Fits inside the 45 s gateway wait (reasoning-on requests measured up to 31 s); capped further by the remaining shared deadline when delegated |
   | `EXTRACT_MAX_TOKENS`, `VALIDATE_MAX_TOKENS` | 4096 each | `hy3` reasons before answering; the validator budget was raised from 2048 after two empty outputs in T-14 |
-  | `EXTRACT_REASONING_EFFORT` | unset (old behaviour); measured configuration `no_think` | `no_think` with extractor prompt v2: median 1.85 s, p95 2.79 s, 34/35, 0 unsafe drafts ([T-14-no-think](evidence/T-14-no-think.md)) |
+  | `EXTRACT_REASONING_EFFORT` | unset (old behaviour); measured configuration `no_think` | `no_think` with extractor prompt v2: median 1.85 s, p95 2.79 s, 34/35, 0 unsafe drafts ([T-14-no-think](evidence/T-14-no-think.md)). The current prompt is extractor-v3 (15 Oct: one added rule for "Keep it" / "Leave it out" answers); the golden set has not been re-run on v3 |
 
   A validation error allows at most 3 attempts per draft and never becomes MATCH.
 - **Validator input.**
@@ -364,7 +369,7 @@ Details behind the current-flow diagrams. Historical measurements below retain t
   - Push-to-talk sentence ASR, not streaming. The browser uploads a 16 kHz mono WAV, and the gateway stores and digest-checks it before transcription.
   - No route accepts client-supplied ASR text.
   - The user's own saved payee names, bank aliases, customer nicknames and billers are passed to TRTC as `hotword_list` (sanitized, at most 30 words). Without them "Ah Ma" was heard as "Amma" ([T-12](evidence/T-12-voice.md)).
-- **Payee matching.** Shared name rules ignore case and word spacing. Near spellings are suggestions only; the customer must resolve the recipient exactly. Nicknames are managed through authenticated gateway routes and included in bank reads, validator labels and voice hotwords. They do not authorize a payment.
+- **Payee matching.** Shared name rules ignore case and word spacing. Near spellings and not-found names produce choices only; the customer must pick the recipient explicitly. Nicknames are managed through authenticated gateway routes and included in bank reads, validator labels and voice hotwords. They do not authorize a payment.
 - **Step-up channel.** It is simulated by the gateway operator routes plus `scripts/operator_console.py`. These are enabled only when `OPERATOR_TOKEN` (at least 32 characters) is set, and they refuse user sessions and agent tokens. The step-up challenge expires with the signed envelope (120 s or less).
 - **Approval UI.** Approval happens in the chat's confirmation, and there is no separate Approve page. It signs the WebAuthn options derived from the stored envelope. Passkeys must be discoverable (resident) credentials.
 - **Langfuse.**
@@ -390,7 +395,7 @@ The local settings loaded during the review also reported an unconfigured valida
 
 ## Improvement flow — implemented
 
-All nodes below are implemented and regression-tested (13 Oct 2026); browser behaviour is covered by fixture tests and one real-browser run with Touch ID ([UI-trace](evidence/UI-trace.md)). Each reusable result must remain scoped to its owner and bound to the current conversation, bundle and relevant bank state. A model setting change must first pass accuracy evaluation.
+All nodes below are implemented and regression-tested (15 Oct 2026); browser behaviour is covered by fixture tests and one real-browser run with Touch ID ([UI-trace](evidence/UI-trace.md)). Each reusable result must remain scoped to its owner and bound to the current conversation, bundle and relevant bank state. A model setting change must first pass accuracy evaluation.
 
 ```mermaid
 flowchart TD

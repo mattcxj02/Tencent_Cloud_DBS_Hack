@@ -182,7 +182,6 @@ Rogue Agent Mode (local only): `uv run python scripts/rogue_agent_demo.py` runs 
 
 | Document | What it covers |
 |---|---|
-| [docs/SUBMISSION.md](docs/SUBMISSION.md) | Hackathon submission: title, blurb, description, measured value, CodeBuddy use, limitations, pilot path |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Trust zones, approval lifecycle, sequence diagram, as-built differences |
 | [docs/evidence/](docs/evidence/README.md) | Outputs from real runs: smokes, isolation probes, telemetry, extraction, voice, end-to-end, evaluation, CodeBuddy sessions |
 | [docs/launch/](docs/launch/README.md) | 24-second launch video, poster, scene stills, 16:9 covers, storyboard and the Hyperframes source |
@@ -196,7 +195,18 @@ Built: all four payment actions, bundles of 1–4 legs, clarifications (with cli
 - the multi-payment and step-up flows in a real browser (they ran live with a software passkey over the real HTTP API; one spoken payment has been run in Chrome with Touch ID: [UI-trace](docs/evidence/UI-trace.md));
 - the 5–8 minute demo video (a 24-second [launch video](docs/launch/README.md) is done) and any hosted deployment.
 
-Limitations are listed in [docs/SUBMISSION.md §7](docs/SUBMISSION.md#7-limitations-and-pending-work).
+## Limitations
+
+- **Attack testing is finite.** 46 attacks held ([T-13](docs/evidence/T-13-attack-matrix.md)), but a valid citation does not prove meaning: "Mum lent me 500" can be drafted as 500, which the customer then sees and must reject. A reference the agent does not declare is not checked against the amount (the passkey and step-up still apply).
+- **Small evaluation.** 35 typed English cases, one to three trials per configuration, hand-made wrong drafts, measured on extractor prompt v2 (the current v3 adds one rule and has not been re-run). One held-out case (`adv-07`) informed a v2 rule. These numbers are not a security proof.
+- **Latency.** With reasoning off, extraction is about 2 s at the median (p95 about 3 s); with reasoning on (the default when `EXTRACT_REASONING_EFFORT` is unset) it was 9–11 s and up to 31 s. Voice-to-ready time has not been measured separately.
+- **Validator limits.** It occasionally runs out of output tokens on 4-leg drafts; this blocks the draft (fails closed).
+- **The confirmation is application UI,** not a browser-protected payment display, and passkey user verification may be a PIN.
+- **The audit chain is tamper-evident only** relative to retained history: no external checkpoints, and no protection against a privileged full rewrite.
+- **Scam rules are keyword heuristics,** with false positives and false negatives.
+- **Isolation.** Containers share one Docker host and kernel; `make dev` runs without isolation.
+- **Not measured:** time saved versus a standard app flow (no usability sessions were run), voice accuracy with real Singaporean speakers, and model cost.
+- Pausing the mandate stops this assistant only, not cards or other channels. A phone needs an HTTPS origin and re-enrollment. The Langfuse project is private; the [UI-trace](docs/evidence/UI-trace.md) screenshots show its traces.
 
 ## How it was built
 
