@@ -8,7 +8,7 @@ Tencent Cloud Hackathon 2026 · DBS track · Scenario 1 (voice-enabled payment a
 
 [![SaySo launch video: one spoken request, from words to receipt (24 s). Click to play.](docs/launch/poster.jpg)](docs/launch/sayso-launch.mp4)
 
-<p align="center"><a href="docs/launch/sayso-launch.mp4"><b>▶ Watch the 24-second launch video</b></a> · <a href="docs/launch/README.md">how it was made</a></p>
+<p align="center"><a href="https://drive.google.com/file/d/11eb43iT5Lxpmj5keamwd-7VRcS4TgP_G/view?usp=sharing"><b>▶ Watch the demo video</b></a> (Google Drive) · <a href="docs/launch/sayso-launch.mp4">24-second launch video</a> · <a href="docs/launch/README.md">how it was made</a></p>
 
 ## What it is
 
@@ -194,7 +194,7 @@ Rogue Agent Mode (local only): `uv run python scripts/rogue_agent_demo.py` runs 
 
 Built: all four payment actions, bundles of 1–4 legs, clarifications (with clickable choices) and corrections, the independent validator, exact-payload passkey approval, hard policy, step-up, mandates, atomic execution, audit, Langfuse, voice through TRTC, live progress stages, the React UI and container isolation. The server side is covered by 1,380 pytest tests and by the live runs in [docs/evidence/](docs/evidence/README.md); extraction takes about 2 s at the median ([T-14-no-think](docs/evidence/T-14-no-think.md)). The React UI is type-checked and builds, with browser fixture pages in `web/tests/`. **Still pending:**
 - the multi-payment and step-up flows in a real browser (they ran live with a software passkey over the real HTTP API; one spoken payment has been run in Chrome with Touch ID: [UI-trace](docs/evidence/UI-trace.md));
-- the 5–8 minute demo video (a 24-second [launch video](docs/launch/README.md) is done) and any hosted deployment.
+- any hosted deployment.
 
 ## Limitations
 
