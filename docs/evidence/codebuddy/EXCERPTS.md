@@ -1,6 +1,6 @@
 # CodeBuddy CLI session excerpts
 
-These lines are copied from the CodeBuddy CLI `stream-json` logs (see [README.md](README.md) for the session table). Sanitized: absolute paths are shortened to repository-relative paths (`~` for the home folder), and request and session IDs are removed from the error lines. Nothing else is changed. Times are SGT. "…" marks omitted lines. Tool calls are shown as `time  Tool  argument`. The task prompts are not stored in `stream-json` output, so they do not appear here. The prompts are in [docs/instructions.md](https://github.com/mattcxj02/Tencent_Cloud_DBS_Hack/blob/dev/docs/instructions.md) (on the `dev` branch); the exact prompts sent are also in [logs/](logs/).
+These lines are copied from the CodeBuddy CLI `stream-json` logs (see [README.md](README.md) for the session table). Sanitized: absolute paths are shortened to repository-relative paths (`~` for the home folder), and request and session IDs are removed from the error lines. Nothing else is changed. Times are SGT. "…" marks omitted lines. Tool calls are shown as `time  Tool  argument`. The task prompts are not stored in `stream-json` output, so they do not appear here. The exact prompts sent are in [logs/](logs/).
 
 ## T-00 scaffold: 9 Oct, session `01a11fc9-…d30e`
 

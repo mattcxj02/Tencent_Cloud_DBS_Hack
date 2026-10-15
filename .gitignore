@@ -43,3 +43,9 @@ references/
 # Launch video: Hyperframes cache, and the bundled music track (licence not yet verified for redistribution)
 .hyperframes/
 docs/launch/composition/assets/music/*.mp3
+
+# Internal working notes kept locally, not in the judge-facing repo
+docs/JUDGE_QA.md
+docs/DEMO_SCRIPT.md
+docs/PLAN.md
+evals/usability/

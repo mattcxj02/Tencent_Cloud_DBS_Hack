@@ -1,8 +1,8 @@
 # evals
 
 T-14 evaluation: a versioned golden set, a runner that drives the **real** agent, gateway and
-validator in-process with live models, Langfuse dataset/experiment publishing, a results
-report, and the usability-study kit. Latest measured results: `docs/evidence/T-14-results.md`.
+validator in-process with live models, Langfuse dataset/experiment publishing, and a results
+report. Latest measured results: `docs/evidence/T-14-results.md`.
 
 | Path | Purpose |
 |---|---|
@@ -14,7 +14,6 @@ report, and the usability-study kit. Latest measured results: `docs/evidence/T-1
 | `report.py` | Summary tables and `report.md` |
 | `run.py` | CLI entry point (`python -m evals.run`) |
 | `fakes.py` | Dry-run fakes: oracle extractor (the case's hand-written quotes) and scripted validator |
-| `usability/` | Protocol, facilitator script and empty results template for the ≈5-tester comparison |
 | `results/<run_id>/` | `results.json` (every captured record) and `report.md` per run |
 
 ## Run

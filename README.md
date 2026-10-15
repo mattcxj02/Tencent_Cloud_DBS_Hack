@@ -33,6 +33,15 @@ One request, end to end (frames from the [launch video](docs/launch/README.md)):
 | ![You sign exactly what you see](docs/launch/stills/04-approve.jpg) | ![Measured on live runs](docs/launch/stills/05-proof.jpg) | ![Nothing moves without your say-so](docs/launch/stills/06-say-so.jpg) |
 | **4. You sign exactly what you see.** Independent check, passkey, one-time code, executed. | **5. Measured.** 0 / 30 wrong drafts reached approval; 46 / 46 attacks held. | **6. Nothing moves without your say-so.** |
 
+The real app (Chrome, Touch ID) and its Langfuse traces for a spoken *"Send John one hundred dollars"* ([full walkthrough](docs/evidence/UI-trace.md)):
+
+| | | |
+|:---:|:---:|:---:|
+| ![Touch ID passkey prompt for localhost](docs/evidence/screenshots/01-sign-in-touch-id.png) | ![One question card for which John and which account, and the answer](docs/evidence/screenshots/02-question-and-answer.png) | ![Confirm this payment: the frozen payment with the independent check](docs/evidence/screenshots/03-confirm.png) |
+| **Sign in.** A real passkey with Touch ID; no password. | **Ask, don't guess.** Code asked which John and which account; the answer is shown in plain words. | **Confirm.** The gateway's frozen payment and the MATCH check, approved within 2 minutes. |
+| ![Receipt: paid on the simulated bank](docs/evidence/screenshots/04-receipt.png) | ![Langfuse: the extractor's input and quote-only output](docs/evidence/screenshots/05-langfuse-extractor.png) | ![Langfuse: the validator's input and MATCH verdict](docs/evidence/screenshots/06-langfuse-validator.png) |
+| **Receipt.** Executed on the simulated bank, with transaction and receipt IDs. | **Extractor trace.** hy3 returned quotes only ("John", "one hundred dollars", source unclear) in 2.4 s. | **Validator trace.** The tapped answer needed no second extraction; DeepSeek checked the frozen leg: MATCH. |
+
 ## Architecture and trust boundary
 
 ```
@@ -60,7 +69,7 @@ Each row is one of the brief's "What the solution should solve" requirements (ha
 | Zero-trust gateway | Only the gateway can touch the ledger. It executes its own stored bytes, never a client payload, after re-checking the signature, owner and every rule in one transaction | Rogue Agent Mode: 46/46 controls held ([T-13](docs/evidence/T-13-attack-matrix.md)); container isolation ([T-04](docs/evidence/T-04-isolation.txt)) |
 | Injection shielding | References and quoted text cannot supply an amount, payee or account; embedded instructions make the validator answer MISMATCH; models have no tools | 9/9 adversarial cases safe ([T-14](docs/evidence/T-14-results.md)); [T-09](docs/evidence/T-09-extract.md) |
 | Risk and velocity controls | Per-payment and daily limits, velocity, KYC, sanctions and funds checks block outright. Totals above SGD 500 or scam-like wording also need a one-time code from a separate (simulated) channel | Sanctioned and over-limit drafts blocked even after MATCH ([T-14](docs/evidence/T-14-results.md)) |
-| Traceable and auditable | Hash-chained audit log, a readable evidence trail per conversation, and Langfuse traces with secrets and account numbers redacted | [T-08](docs/evidence/T-08-telemetry.md) |
+| Traceable and auditable | Hash-chained audit log, a readable evidence trail per conversation, and Langfuse traces with secrets and account numbers redacted | [T-08](docs/evidence/T-08-telemetry.md); [UI and trace screenshots](docs/evidence/UI-trace.md) |
 
 **Also enforced, not shown to the customer:** single-use approvals (a retry or race returns the original receipt, never a second payment); a 120-second, narrowly scoped token for the agent; validator results bound to the draft, conversation and balances they checked; readiness checks before any model call; and mandate changes signed with the passkey, where loosening a limit waits a cooling period (`#/mandate`).
 
@@ -174,28 +183,24 @@ Rogue Agent Mode (local only): `uv run python scripts/rogue_agent_demo.py` runs 
 | Document | What it covers |
 |---|---|
 | [docs/SUBMISSION.md](docs/SUBMISSION.md) | Hackathon submission: title, blurb, description, measured value, CodeBuddy use, limitations, pilot path |
-| [docs/DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md) | 5–8 minute demo shot list with exact utterances |
-| [docs/JUDGE_QA.md](docs/JUDGE_QA.md) | Likely judge questions with short, honest answers |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Trust zones, approval lifecycle, sequence diagram, as-built differences |
 | [docs/evidence/](docs/evidence/README.md) | Outputs from real runs: smokes, isolation probes, telemetry, extraction, voice, end-to-end, evaluation, CodeBuddy sessions |
-| [docs/PLAN.md](docs/PLAN.md) | Original plan and contracts (v0.3). Working notes (task prompts, status log, improvement plan) are on the [`dev` branch](https://github.com/mattcxj02/Tencent_Cloud_DBS_Hack/blob/dev/docs/README.md) |
 | [docs/launch/](docs/launch/README.md) | 24-second launch video, poster, scene stills, 16:9 covers, storyboard and the Hyperframes source |
 | [docs/cover/](docs/cover/README.md) | Original 16:9 cover image (SVG) and export steps |
 | [CODEBUDDY.md](CODEBUDDY.md) | Project rules and invariants given to the coding agents |
 | Folder READMEs | [gateway](gateway/README.md), [agent](agent/README.md), [validator](validator/README.md), [shared](shared/README.md), [ledger](ledger/README.md), [prompts](prompts/README.md), [web](web/README.md), [infra](infra/README.md), [evals](evals/README.md), [scripts](scripts/README.md), [tests](tests/README.md) |
 
-## Status (13 Oct 2026)
+## Status (15 Oct 2026)
 
-Built: all four payment actions, bundles of 1–4 legs, clarifications (with clickable choices) and corrections, the independent validator, exact-payload passkey approval, hard policy, step-up, mandates, atomic execution, audit, Langfuse, voice through TRTC, live progress stages, the React UI and container isolation. The server side is covered by 1,359 pytest tests and by the live runs in [docs/evidence/](docs/evidence/README.md); extraction takes about 2 s at the median ([T-14-no-think](docs/evidence/T-14-no-think.md)). The React UI is type-checked and builds, with browser fixture pages in `web/tests/`. **Still pending:**
-- a real-browser walkthrough with Touch ID and a microphone (the live end-to-end run used a software passkey over the real HTTP API);
-- the usability sessions (kit ready in [evals/usability/](evals/usability/README.md));
-- the 5–8 minute demo video (a 24-second [launch video](docs/launch/README.md) is done), CodeBuddy screenshots and any hosted deployment.
+Built: all four payment actions, bundles of 1–4 legs, clarifications (with clickable choices) and corrections, the independent validator, exact-payload passkey approval, hard policy, step-up, mandates, atomic execution, audit, Langfuse, voice through TRTC, live progress stages, the React UI and container isolation. The server side is covered by 1,380 pytest tests and by the live runs in [docs/evidence/](docs/evidence/README.md); extraction takes about 2 s at the median ([T-14-no-think](docs/evidence/T-14-no-think.md)). The React UI is type-checked and builds, with browser fixture pages in `web/tests/`. **Still pending:**
+- the multi-payment and step-up flows in a real browser (they ran live with a software passkey over the real HTTP API; one spoken payment has been run in Chrome with Touch ID: [UI-trace](docs/evidence/UI-trace.md));
+- the 5–8 minute demo video (a 24-second [launch video](docs/launch/README.md) is done) and any hosted deployment.
 
 Limitations are listed in [docs/SUBMISSION.md §7](docs/SUBMISSION.md#7-limitations-and-pending-work).
 
 ## How it was built
 
-CodeBuddy Code CLI built tasks T-00 to T-04 and most of T-05 in headless sessions (logs summarized in [docs/evidence/codebuddy/](docs/evidence/codebuddy/README.md)) until its credits ran out on 10 Oct. Claude Code subagents built the remaining tasks. A lead Claude Code session reviewed every task: it read the diffs, re-ran the checks and fixed the defects it found.
+CodeBuddy Code CLI built tasks T-00 to T-04 and most of T-05 in headless sessions (logs summarized in [docs/evidence/codebuddy/](docs/evidence/codebuddy/README.md)) until its credits ran out on 10 Oct ([screenshots](docs/evidence/codebuddy/README.md#screenshots)). Claude Code subagents built the remaining tasks. A lead Claude Code session reviewed every task: it read the diffs, re-ran the checks and fixed the defects it found.
 
 ## Credits
 

@@ -1,6 +1,6 @@
 # DCTA v0.3 architecture
 
-Current implementation overview, reviewed **13 October 2026** against the working tree (all six improvement-plan phases merged). These diagrams describe the code, not a claim that every dependency is configured or that the system is deployed. The final section separates verified readiness from the remaining proposed improvements. See [PLAN.md](PLAN.md) for the original contracts and [IMPROVEMENT_PLAN.md](https://github.com/mattcxj02/Tencent_Cloud_DBS_Hack/blob/dev/docs/IMPROVEMENT_PLAN.md) (on the `dev` branch) for the consolidated improvement plan and implementation brief.
+Current implementation overview, reviewed **13 October 2026** against the working tree (all six improvement-plan phases merged). These diagrams describe the code, not a claim that every dependency is configured or that the system is deployed. The final section separates verified readiness from the remaining proposed improvements.
 
 DCTA turns a customer's words into a bundle of 1–4 simulated SGD transactions: transfers to own accounts, saved payees or PayNow contacts; bills; card payments; and mock SGX purchases. **Models prepare and check drafts. Only the gateway can execute, after the user approves the exact stored payment.** Bank data and settlement are synthetic; passkey approval uses real WebAuthn. Langfuse is the required observability backend.
 
@@ -325,7 +325,7 @@ Langfuse is a real required backend: correlated traces across agent/validator/ga
 
 The gateway's prototype hash chain stores authoritative decisions and distinguishes untrusted agent event reports. Local audit failure rolls back payment. Langfuse outage reports degraded observability and triggers bounded sanitized export retry, but cannot relax controls or repeat a payment. The final submission must still include verified backend traces and experiment runs. A hash chain alone cannot prove resistance to privileged full rewriting or tail deletion; signed external checkpoints remain future work.
 
-The MVP diagram intentionally shows no signed pack registry, agent-signed draft, gateway-signed ledger order or signed receipt. Those were unimplemented additions to the prior drawing; the full product features in PLAN remain unchanged. Recommendations are preserved in `PLAN_REVIEW.md` (on the `dev` branch) as optional future work.
+The MVP diagram intentionally shows no signed pack registry, agent-signed draft, gateway-signed ledger order or signed receipt. Those were unimplemented additions to the prior drawing; the full product features in the plan remain unchanged, and those recommendations are kept as optional future work.
 
 ## Implementation details and current limitations (12 Oct 2026)
 
@@ -371,7 +371,7 @@ Details behind the current-flow diagrams. Historical measurements below retain t
   - Langfuse Cloud (US region), SDK 4.17. Read-back uses the v2 observations API, because the legacy trace API returns 410 for this organization.
   - The gateway's `ingest` span never exports turn text. Model generations export the model-visible data, with account IDs replaced by display labels.
 - **Isolation.** Compose uses two bridge networks, `agent_net` and `validator_net`. Neither is `internal`, so both models keep outbound LLM egress, but the agent and validator cannot reach each other. Their root filesystems are read-only, only the gateway has the `/data` volume, and each container gets only its own LLM key ([T-04](evidence/T-04-isolation.txt)).
-- **Usability baseline.** A conventional form at `#/baseline` (it makes no gateway calls), for the comparison study in `evals/usability/`.
+- **Conventional baseline.** A conventional form at `#/baseline` (it makes no gateway calls), for comparing the assistant with a standard menu flow. No usability sessions were run.
 - **Attack checks.** The Rogue Agent Mode harness rerun on 12 Oct held 46/46 controls with synthetic data; the historical [T-13 attack matrix](evidence/T-13-attack-matrix.md) was preserved. Its container row still uses retained evidence, not a fresh container probe.
 - **Not built:** signed pack registries, signed receipts, external audit checkpoints, Tencent APM, TTS and public hosting.
 
@@ -390,7 +390,7 @@ The local settings loaded during the review also reported an unconfigured valida
 
 ## Improvement flow — implemented
 
-All nodes below are implemented and regression-tested (13 Oct 2026); browser behaviour is covered by fixture tests, not yet by a real-browser walkthrough. Detailed work and acceptance criteria are in [IMPROVEMENT_PLAN.md](https://github.com/mattcxj02/Tencent_Cloud_DBS_Hack/blob/dev/docs/IMPROVEMENT_PLAN.md) on the `dev` branch. Each reusable result must remain scoped to its owner and bound to the current conversation, bundle and relevant bank state. A model setting change must first pass accuracy evaluation.
+All nodes below are implemented and regression-tested (13 Oct 2026); browser behaviour is covered by fixture tests and one real-browser run with Touch ID ([UI-trace](evidence/UI-trace.md)). Each reusable result must remain scoped to its owner and bound to the current conversation, bundle and relevant bank state. A model setting change must first pass accuracy evaluation.
 
 ```mermaid
 flowchart TD

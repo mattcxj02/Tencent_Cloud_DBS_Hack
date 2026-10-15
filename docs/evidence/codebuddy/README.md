@@ -1,10 +1,10 @@
 # docs/evidence/codebuddy: CodeBuddy development sessions (T-00 to T-05)
 
-This folder is evidence of CodeBuddy use for the hackathon submission. It holds this session table and [EXCERPTS.md](EXCERPTS.md), which has short sanitized excerpts from each session. Screenshots go in `screenshots/` once they are captured (see "Still to do"). Nothing in this folder contains credentials.
+This folder is evidence of CodeBuddy use for the hackathon submission. It holds this session table and [EXCERPTS.md](EXCERPTS.md), which has short sanitized excerpts from each session. Three screenshots of the real sessions are in [`screenshots/`](screenshots/) (see "Screenshots"). Nothing in this folder contains credentials.
 
 The figures were compiled on 10 Oct 2026 from the CodeBuddy CLI's own `stream-json` session logs, one JSONL file per run. A small Python script read them from those logs. The logs were not hand-edited, and no figure was estimated.
 
-**Who built what.** CodeBuddy Code CLI 2.160.0 ran headless (`codebuddy -p`). It built T-00 to T-04 and most of T-05. On 10 Oct at 11:13 SGT its credits ran out (HTTP 429, "Credits exhausted"), and they will not reset before the deadline. From then on, Claude Code subagents built the remaining tasks (T-06 to T-15) and finished T-05. A lead Claude Code session, directed by the entrant, reviewed every task, CodeBuddy's included. It read each diff, re-ran the checks and fixed the defects listed in the Outcome column. Those fixes come from [STATUS.md](https://github.com/mattcxj02/Tencent_Cloud_DBS_Hack/blob/dev/docs/STATUS.md) (on the `dev` branch).
+**Who built what.** CodeBuddy Code CLI 2.160.0 ran headless (`codebuddy -p`). It built T-00 to T-04 and most of T-05. On 10 Oct at 11:13 SGT its credits ran out (HTTP 429, "Credits exhausted"), and they will not reset before the deadline. From then on, Claude Code subagents built the remaining tasks (T-06 to T-15) and finished T-05. A lead Claude Code session, directed by the entrant, reviewed every task, CodeBuddy's included. It read each diff, re-ran the checks and fixed the defects listed in the Outcome column. Those fixes come from the lead session's status log.
 
 ## Sessions
 
@@ -31,19 +31,14 @@ Times are Singapore time (UTC+8). "Active" runs from the first logged event to t
 - **Security details needed a second reader.** Every CodeBuddy task needed at least one reviewer fix, and all of these were authorization or binding gaps that its tests had not covered (see the table). The most serious: the first Approve page signed the wrong challenge and hid the amounts.
 - **Headless limits.** Plan mode cannot be exited without an interactive prompt, so the T-05 plan had to be run in a second, resumed invocation.
 
-## Still to do (owner)
+## Screenshots
 
-The handbook (p. 37) asks for "a minimum of 3 screenshots/screen recording of your chat logs from CodeBuddy or WorkBuddy during the development process". The same page says "Proof of product usage is mandatory: chat screenshots, API call logs, or a written development-process description". These logs and this summary cover the second and third kinds of proof. **No screenshots exist yet (0 of 3).** Do not substitute mock-ups.
+The handbook (p. 37) asks for "a minimum of 3 screenshots/screen recording of your chat logs from CodeBuddy or WorkBuddy during the development process". These are captures of CodeBuddy's own interfaces showing the saved sessions; they are not mock-ups or replays.
 
-1. **Raw logs are preserved** in [`logs/`](logs/): the eight CodeBuddy CLI stream-json transcripts plus the exact prompts the lead sent. Checked on 11 Oct: every key-like string in them is a `.env.example` placeholder, and none of the owner's configured secret values appears anywhere in the repository. They contain local paths and full file contents, so read them before sharing publicly.
-2. **Screenshot the real sessions in CodeBuddy's own interface.** The owner can use the Web UI: `codebuddy --serve --open` from the repository root lists this project's saved sessions, including the 13 Oct Phase 5 session `01a130da-a414-7dda-ad70-6e589db2854a` (task list, sub-agents, then the 429 stop). From the repository root, run `codebuddy -r 01a121b9-dede-7a33-92d8-7fe9d77bf63b` (T-02), or run `codebuddy -r` and pick a session. `-r/--resume` is listed in `codebuddy --help` for 2.160.0. Screenshot the restored history, then exit without sending a prompt, because credits are exhausted. Good candidates:
-   - T-02, where it reads the plan, makes its task list and gets 196 tests passing.
-   - T-04, where the isolation probe goes from 25/26 to 26/26.
-   - T-05, which shows the plan-mode plan and the `429 Credits exhausted` stop.
+| Screenshot | What it shows |
+|---|---|
+| ![CodeBuddy CLI resume view with the T-02 task prompt](screenshots/01-cli-resume-t02-prompt.webp) | **CLI** (`codebuddy -r`): the restored history opens with the lead's T-02 task prompt (hard rules, the ledger, seed, delegation-token and read-API spec, and the required tests), and CodeBuddy's first reply. |
+| ![CodeBuddy Web UI: T-02 complete](screenshots/02-webui-t02-summary.webp) | **Web UI** (`codebuddy --serve --open`): the end of the T-02 session after 102 steps: "T-02 Complete", with the files it created (`ledger/schema.py`, `ledger/seed.py`, `gateway/auth/delegation.py`, `gateway/bank_routes.py`, ...). |
+| ![CodeBuddy Web UI: T-03 complete](screenshots/03-webui-t03-summary.webp) | **Web UI**: the end of the T-03 session after 86 steps: "All 245 tests pass, ruff check passes", then the conversation store and audit-chain summary. |
 
-   `codebuddy --serve --open` (Web UI) may also list past sessions. Check before relying on it.
-3. **Screenshot the usage page.** The 429 message links to `https://www.codebuddy.ai/profile/usage`. A screenshot of the credit usage for 9–10 Oct is direct proof of usage.
-4. **If credits are restored,** record one short new CodeBuddy session (IDE or CLI) on a real remaining task, for example a README review or a test for a known limit. Label it with its real date.
-5. If the resume view does not work, a terminal replay of these JSONL logs (for example a script that prints each assistant message and tool call) is truthful only when it is labelled "replay of CodeBuddy CLI session log". It is weaker evidence than the CLI's own view.
-
-Put captures in `screenshots/`, each named with its task and date, and check that no key, token or `.env` content is visible.
+**Raw logs** are in [`logs/`](logs/): the eight CodeBuddy CLI stream-json transcripts plus the exact prompts the lead sent. Every key-like string in them is a `.env.example` placeholder, and none of the owner's configured secret values appears anywhere in the repository.

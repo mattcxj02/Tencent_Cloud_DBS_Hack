@@ -1,6 +1,6 @@
 # Submission: SaySo (DBS track, Scenario 1)
 
-This page follows the submission fields on handbook p. 37. Every number comes from a file in [evidence/](evidence/README.md), and each is cited where it appears. Status as of 10 Oct 2026. Items marked **pending** are not done yet.
+This page follows the submission fields on handbook p. 37. Every number comes from a file in [evidence/](evidence/README.md), and each is cited where it appears. Status as of 15 Oct 2026.
 
 | Field | Entry |
 |---|---|
@@ -8,9 +8,9 @@ This page follows the submission fields on handbook p. 37. Every number comes fr
 | **Short blurb** (under 10 words) | **Speak your payments. Verify every detail. Stay in control.** (9 words) |
 | **Track and scenario** | DBS · Scenario 1: Voice-Enabled Payment and Transaction, with KYC and basic risk control (handbook p. 8) |
 | **Project description** | Below: short version, then sections 1–8 |
-| **CodeBuddy / WorkBuddy conversation history** | 8 logged CodeBuddy CLI runs, summarized in [evidence/codebuddy/](evidence/codebuddy/README.md) with [excerpts](evidence/codebuddy/EXCERPTS.md). Screenshots (at least 3): **pending, owner** |
+| **CodeBuddy / WorkBuddy conversation history** | 8 logged CodeBuddy CLI runs, summarized in [evidence/codebuddy/](evidence/codebuddy/README.md) with [excerpts](evidence/codebuddy/EXCERPTS.md). Three screenshots of the real sessions: [evidence/codebuddy/screenshots](evidence/codebuddy/README.md#screenshots) |
 | **Cover image** (16:9) | [cover/cover.png](cover/cover.png) (1920×1080), [cover/cover-380x216.png](cover/cover-380x216.png), source [cover/cover.svg](cover/cover.svg) |
-| **Demo video** (optional) | Script: [DEMO_SCRIPT.md](DEMO_SCRIPT.md). Recording: **pending, owner** |
+| **Demo video** (optional) | A 24-second [launch video](launch/README.md). A 5–8 minute demo recording is not included |
 | **Project link** (optional) | None. This is a local demo. A hosted HTTPS deployment would need passkeys re-enrolled on its origin and has not been done |
 
 ## Short description (paste-ready)
@@ -27,7 +27,7 @@ SaySo is a voice and chat payments feature for a bank's app: a Direct Conversati
 
 ## 2. Real-world scenario insights
 
-**Pain points.** We treat these as hypotheses; the usability comparison that tests them is **pending**.
+**Pain points.** These are hypotheses; no usability study was run to test them.
 - **Menu friction.** Each payment in a banking app is its own flow (pick payee → amount → account → review → confirm). Three routine payments mean three flows. Customers who struggle with small screens and nested menus, such as many older customers, feel this most.
 - **Voice is natural but error-prone.** Local names are misheard. In our live test, TRTC heard "Ah Ma" as "Amma" until the customer's saved payee names were passed as hotwords ([T-12](evidence/T-12-voice.md)). A wrong name or amount has to be visible and fixable before anything is approved.
 - **An agent that can pay is a new attack surface.** If a language model can call payment APIs, text it reads can steer it. Examples: an injected bill reference, a forwarded "ignore previous instructions" message, or a fake "app:" line. Banks need AI that helps but cannot authorize.
@@ -157,7 +157,7 @@ The false rejects fell because the gateway now gives the validator frozen **calc
 - **Secret canaries:** planted secrets were absent from Langfuse ([T-08](evidence/T-08-telemetry.md)).
 - **Langfuse experiments:** dataset `dcta-golden-v1` with an extractor-only run and an extractor + validator run ([T-14](evidence/T-14-results.md)).
 
-**What this means for a bank.** One sentence can carry up to four routine payments with one approval. In these probes, misdrafted payments were stopped before the customer was asked to approve. Hard limits held even when the AI check agreed with a risky request. Every outcome is traceable. **Not yet measured:** time saved versus the standard app flow (usability study pending), voice accuracy with real Singaporean speakers, and cost (no model prices were configured, so cost is recorded as unavailable, not zero; token counts are in T-14).
+**What this means for a bank.** One sentence can carry up to four routine payments with one approval. In these probes, misdrafted payments were stopped before the customer was asked to approve. Hard limits held even when the AI check agreed with a risky request. Every outcome is traceable. **Not yet measured:** time saved versus the standard app flow (no usability study was run), voice accuracy with real Singaporean speakers, and cost (no model prices were configured, so cost is recorded as unavailable, not zero; token counts are in T-14).
 
 ## 5. How CodeBuddy was used
 
@@ -177,7 +177,7 @@ The false rejects fell because the gateway now gives the validator frozen **calc
   - Run headless with a permission mode that allows tests. The T-00 session could not run a single command.
   - Keep each task to one owned folder.
   - Have a second reader check every money-moving or signing path.
-- **Pending (owner):** at least 3 screenshots of CodeBuddy sessions. The session folder lists how to capture them truthfully.
+- **Screenshots:** three captures of the real CodeBuddy sessions (CLI resume view and Web UI) are in [evidence/codebuddy/](evidence/codebuddy/README.md#screenshots).
 
 ## 6. Mock disclosures
 
@@ -193,7 +193,7 @@ There is one demo user (plus a second user, Ana, who shares the joint account), 
 
 ## 7. Limitations and pending work
 
-- **Pending (owner):** a real-browser walkthrough with Touch ID and a microphone (the live end-to-end run used a software passkey over the real API); about 5 usability sessions comparing chat with the conventional baseline page ([kit](../evals/usability/README.md)); the demo video; CodeBuddy screenshots.
+- **Testing scope.** One spoken payment was run end to end in Chrome with Touch ID ([UI-trace](evidence/UI-trace.md)). The multi-payment and step-up flows were run live with a software passkey over the real API ([E2E-live](evidence/E2E-live.md)). No usability sessions were run, and there is no 5–8 minute demo recording.
 - **Attack testing is finite.** 46 attacks against the real gateway with a malicious extractor and a validator forced to answer MATCH: all 46 controls held; the ledger was unchanged in 42 rows and the 4 retry/race rows produced exactly one legitimate commit ([matrix](evidence/T-13-attack-matrix.md)). Residual risks noted there: a valid citation does not prove meaning ("Mum lent me 500" can be drafted as 500, which the customer then sees and must reject); a reference the agent does not declare is not checked against the amount (the passkey and step-up still apply); the hash chain does not detect a privileged full rewrite.
 - **Latency.** With reasoning off, extraction takes p50 about 2 s (p95 about 3 s). With reasoning on (the code default when `EXTRACT_REASONING_EFFORT` is unset) it was p50 about 9–11 s and up to 31 s. Drafting has one 90 s overall deadline. Complete voice-to-ready time has not been measured separately.
 - **Validator limits.** False rejects fell from 5/25 to 0/24 in one trial. The validator still occasionally runs out of output tokens on 4-leg drafts; this blocks the draft (fails closed) rather than detecting the error.

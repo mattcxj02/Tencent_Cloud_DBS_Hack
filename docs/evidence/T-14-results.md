@@ -152,9 +152,7 @@ extractor client's 60 s.
 
 ## Not measured (pending)
 
-- **Usability study**: the kit is ready (`evals/usability/`: protocol, facilitator script,
-  empty results template). No sessions have run, so no participant data exists. The
-  observation → UI change → recheck step is also pending.
+- **Usability study**: not run, so no participant data exists.
 - **Voice**: no recorded speech is in this set. ASR finals can only come from the gateway's
   TRTC call on real audio, so voice transcription accuracy must be measured separately with
   consented recordings (T-12). The figures above are typed transcript-to-draft accuracy only.

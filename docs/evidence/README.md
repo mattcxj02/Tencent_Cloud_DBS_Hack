@@ -12,9 +12,10 @@ Outputs from real runs, kept for the submission and for review. Nothing here is 
 | `T-13-attack-matrix.md` | Rogue Agent Mode (`scripts/rogue_agent_demo.py`): malicious extractor + validator forced to MATCH vs the real gateway; 46/46 controls held |
 | `T-14-results.md` | 35-case golden set: extractor and validator results measured live, Langfuse dataset/experiment links |
 | `E2E-live.md` | Full live run over HTTP: draft → clarify → validate → passkey → step-up → commit → receipt, with Langfuse trace |
-| `codebuddy/README.md` | CodeBuddy CLI sessions T-00–T-05 compiled from the CLI's own JSONL logs: session IDs, times, turns, tool calls, files, outcome and reviewer fixes; owner steps for the required screenshots |
+| `UI-trace.md` | One spoken payment in the real web app (question, confirmation, receipt) with its two Langfuse traces; screenshots in `screenshots/` |
+| `codebuddy/README.md` | CodeBuddy CLI sessions T-00–T-05 compiled from the CLI's own JSONL logs: session IDs, times, turns, tool calls, files, outcome and reviewer fixes; three screenshots of the real sessions |
 | `codebuddy/EXCERPTS.md` | Short sanitized excerpts from each CodeBuddy session log (opening, tool calls, test/probe results, credit-exhaustion and network-error endings) |
 
-Secrets are never recorded. CodeBuddy screenshots for the submission go in `codebuddy/screenshots/` when captured (none yet).
+Secrets are never recorded. Three CodeBuddy screenshots for the submission are in `codebuddy/screenshots/`.
 
 - [phase6-validator-findings.md](phase6-validator-findings.md): investigation of the five historical false rejects, validator v2 changes, frozen calculation binding, enrollment regression results and outstanding live gates.
