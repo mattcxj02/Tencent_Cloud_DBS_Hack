@@ -58,7 +58,8 @@ def test_grouped_recipient_and_source_resume_without_extraction_and_validate(o: 
     response = answer(o, conv, answer_body(question))
     assert response.status_code == 200, response.text
     turn = response.json()
-    assert "Mum (account ending 9988)" in turn["text"]
+    # Reads as the customer's answer, with no internal leg or field names.
+    assert turn["text"] == "Mum (account ending 9988), from savings (account ending 1234)"
     result = o.drafted(conv)
     assert result["status"] == "ready", result
     assert result["conversation_revision"] == 2
@@ -381,7 +382,11 @@ def test_relative_and_remaining_amounts_recomputed_from_structured_sources(o: Or
     o.env.sql(
         "UPDATE accounts SET balance_cents = 1100000 WHERE account_id = 'acct-matthew-savings'"
     )
-    assert answer(o, conv, answer_body(q, ("savings", "savings", "savings"))).status_code == 200
+    response = answer(o, conv, answer_body(q, ("savings", "savings", "savings")))
+    assert response.status_code == 200
+    assert response.json()["text"] == "; ".join(
+        f"Payment {n}: from savings (account ending 1234)" for n in (1, 2, 3)
+    )
     result = o.drafted(conv)
     assert result["status"] == "ready", result
     # Gateway recomputes ordered debits against its current authoritative balance.

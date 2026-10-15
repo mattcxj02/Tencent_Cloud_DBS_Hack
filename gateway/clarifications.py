@@ -202,7 +202,12 @@ def selected_answer(
         raise ValueError("CHOICE_ANSWER_AMBIGUOUS")
     chosen = []
     seen = set()
+    # Read as the customer's own answer: "John Tan (account ending 8892), from current
+    # (account ending 5678)", with "Payment 2: …" only when several payments are answered.
+    # Each label stays verbatim, so its span is exact selection evidence.
+    several = len({f["leg_id"] for f in q["fields"]}) > 1
     text = ""
+    leg = None
     for s in selections:
         f = fields.get(s.field_id)
         if f is None or s.field_id in seen or (s.leg_id, s.field) != (f["leg_id"], f["field"]):
@@ -216,7 +221,13 @@ def selected_answer(
         label = record_label(conn, user_id, TargetType(c["target_type"]), c["record_id"])
         if label != c["label"]:
             raise ValueError("CHOICE_RECORD_CHANGED")
-        text += f"{f['leg_id']} {f['field']}: "
+        if f["leg_id"] != leg:
+            text += "; " if text else ""
+            text += f"Payment {f['leg_id'].removeprefix('leg-')}: " if several else ""
+            leg = f["leg_id"]
+        else:
+            text += ", "
+        text += "from " if f["field"] == "source" else ""
         start = len(text)
         text += label
         chosen.append(
@@ -227,8 +238,7 @@ def selected_answer(
                 "span": {"start": start, "end": len(text), "text": label},
             }
         )
-        text += "; "
-    return text.rstrip("; "), chosen
+    return text, chosen
 
 
 def last_question(conn: sqlite3.Connection, conversation_id: str) -> dict | None:
