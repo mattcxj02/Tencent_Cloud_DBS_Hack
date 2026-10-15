@@ -149,8 +149,9 @@ The demo user starts with savings 12,000.00, current 3,500.00 and joint 2,000.00
 **Step-up codes.** Payments over SGD 500 or with scam-like wording need a code from the simulated "SMS" channel. In a third terminal (it reads `OPERATOR_TOKEN` from `.env`):
 
 ```bash
+make otp                                       # the code for the one payment waiting for it
 make operator ARGS='list'                      # payments waiting for a code (never shows codes)
-make operator ARGS='code <authorization_id>'   # "delivers" and prints the 6-digit code
+make operator ARGS='code <authorization_id>'   # the code for one payment, when several wait
 ```
 
 **Day to day.** Ctrl-C stops all three services; `make stop` does the same from another terminal (a second `make dev` in the same checkout is refused). After pulling changes, run `make upgrade-db` instead of `reset-db` to add new tables and keep your passkey and history. `make reset-db` starts over and removes enrolled passkeys.

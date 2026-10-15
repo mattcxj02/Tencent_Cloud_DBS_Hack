@@ -11,10 +11,13 @@ Usage::
 
     OPERATOR_TOKEN=... uv run python scripts/operator_console.py list
     OPERATOR_TOKEN=... uv run python scripts/operator_console.py code <authorization_id>
+    OPERATOR_TOKEN=... uv run python scripts/operator_console.py code   # the only waiting one
     # optional: --base-url http://localhost:8002 (default)
 
 ``list`` shows challenges waiting for a code (never the codes). ``code`` "delivers" the
 code for one authorization (repeatable; the expiry is never extended) and prints it.
+Without an ID it delivers the code only when exactly one challenge is waiting; with none
+or several it prints the list and asks for the ID, so it never picks between payments.
 Exit codes: 0 ok, 1 gateway refused or unreachable, 2 usage/configuration error.
 Not production MFA: no SMS, push or bank channel is involved.
 """
@@ -83,6 +86,18 @@ def deliver(client: httpx.Client, token: str, authorization_id: str) -> dict[str
     return _request(client, "POST", f"/operator/step-up/{authorization_id}/deliver", token)
 
 
+def deliver_only_pending(client: httpx.Client, token: str, out: TextIO) -> dict[str, Any]:
+    """The code for the single waiting challenge; with none or several, list and refuse."""
+    body = list_pending(client, token)
+    challenges = body.get("challenges") or []
+    if len(challenges) == 1 and isinstance(challenges[0].get("authorization_id"), str):
+        return deliver(client, token, challenges[0]["authorization_id"])
+    _print_list(body, out)
+    if not challenges:
+        raise ConsoleError("no step-up code is waiting (approve a payment first)")
+    raise ConsoleError("several codes are waiting; run: code <authorization_id>")
+
+
 def _print_list(body: dict[str, Any], out: TextIO) -> None:
     print(body.get("simulation", "SIMULATED channel"), file=out)
     challenges = body.get("challenges") or []
@@ -121,7 +136,7 @@ def main(
     sub = parser.add_subparsers(dest="command")
     sub.add_parser("list", help="challenges waiting for a code (no codes)")
     code = sub.add_parser("code", help="deliver and print the code for an authorization")
-    code.add_argument("authorization_id")
+    code.add_argument("authorization_id", nargs="?", help="omit when exactly one code is waiting")
     args = parser.parse_args(argv)
 
     token = operator_token(environ)
@@ -130,7 +145,9 @@ def main(
         return 2
     http = client or make_client(args.base_url)
     try:
-        if args.command == "code":
+        if args.command == "code" and args.authorization_id is None:
+            _print_code(deliver_only_pending(http, token, out), out)
+        elif args.command == "code":
             _print_code(deliver(http, token, args.authorization_id), out)
         else:
             _print_list(list_pending(http, token), out)

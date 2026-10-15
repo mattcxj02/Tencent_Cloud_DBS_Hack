@@ -99,3 +99,28 @@ def test_client_sends_no_cookies_or_ambient_credentials() -> None:
         assert client.trust_env is False
     finally:
         client.close()
+
+
+def test_code_without_an_id_uses_the_only_waiting_payment(v: V) -> None:
+    code, out, err = _run("code")
+    assert code == 1 and "no step-up code is waiting" in err and "No step-up challenges" in out
+
+    authz_id = _awaiting(v)
+    code, out, err = _run("code")
+    assert (code, err) == (0, "")
+    match = re.search(rf"code for {authz_id} is (\d{{6}}) ", out)
+    assert match is not None, out
+    submitted = v.client.post(
+        f"/api/authorizations/{authz_id}/step-up",
+        json={"code": match.group(1)},
+        headers={"Origin": "http://localhost:5173"},
+    )
+    assert submitted.json()["status"] == "COMMITTED", submitted.text
+
+
+def test_code_without_an_id_refuses_to_pick_between_several(v: V) -> None:
+    first, second = _awaiting(v), _awaiting(v)
+    code, out, err = _run("code")
+    assert code == 1 and "several codes are waiting" in err
+    assert first in out and second in out
+    assert not re.search(r"\b\d{6}\b", out)  # the list never shows a code

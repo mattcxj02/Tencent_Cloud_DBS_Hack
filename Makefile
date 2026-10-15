@@ -1,5 +1,5 @@
 # DCTA Makefile — common development targets
-.PHONY: env eval-fake operator reset-db upgrade-db test lint web-build dev stop seed eval smoke-llm smoke-asr smoke-langfuse smoke-validate smoke-telemetry smoke-extract smoke-voice \
+.PHONY: env eval-fake operator otp reset-db upgrade-db test lint web-build dev stop seed eval smoke-llm smoke-asr smoke-langfuse smoke-validate smoke-telemetry smoke-extract smoke-voice \
        compose-build compose-up compose-down isolation-probe enroll-code
 
 # ── Setup ──
@@ -62,6 +62,10 @@ eval-fake:
 # Uses an exported OPERATOR_TOKEN if set, otherwise only that one value from .env.
 operator:
 	@OPERATOR_TOKEN="$${OPERATOR_TOKEN:-$$(sed -n 's/^OPERATOR_TOKEN=//p' .env 2>/dev/null)}" uv run python scripts/operator_console.py $(ARGS)
+
+# The code for the one payment waiting for it (lists them and stops if none or several).
+otp:
+	@$(MAKE) --no-print-directory operator ARGS='code'
 
 # ── Smoke checks ──
 
