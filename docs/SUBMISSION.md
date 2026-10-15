@@ -95,7 +95,7 @@ Key mechanisms:
 
 ### How the prompts drive the AI
 
-| | Extractor ([prompts/extractor.md](../prompts/extractor.md), `extractor-v2`) | Validator ([prompts/validator.md](../prompts/validator.md), `validator-v2`) |
+| | Extractor ([prompts/extractor.md](../prompts/extractor.md), `extractor-v3`) | Validator ([prompts/validator.md](../prompts/validator.md), `validator-v2`) |
 |---|---|---|
 | Model | TokenHub `hy3` | DeepSeek `deepseek-flash` (a different vendor) |
 | Input | The conversation as a JSON data object | The full ordered conversation (including app questions, corrections and answers), the frozen bundle and the bank's display labels, between fixed data markers. **No extractor output or reasoning** |

@@ -107,8 +107,18 @@ export const CODE_MESSAGES: Record<string, string> = {
   LLM_TIMEOUT: 'The independent check took too long.',
   LLM_NOT_CONFIGURED: 'The independent check is not configured.',
   LLM_PROVIDER_ERROR: 'The independent check service had an error.',
+  LLM_CONFIGURATION_ERROR: 'The independent check needs setup. Please contact the operator.',
+  LLM_OUTPUT_TRUNCATED:
+    "The independent check couldn't reach a clear answer, so nothing was paid. Please say the whole request again, or start a new conversation.",
+  LLM_EMPTY_OUTPUT: 'The independent check returned no answer, so nothing was paid. Please try again.',
+  LLM_ABNORMAL_FINISH: 'The independent check stopped before answering, so nothing was paid. Please try again.',
+  LLM_UNEXPECTED_TOOL_CALL: 'The independent check returned an unusable answer, so nothing was paid. Please try again.',
   OUTPUT_NOT_JSON: 'The independent check returned an unusable answer, so this cannot be approved.',
   OUTPUT_SCHEMA_INVALID: 'The independent check returned an unusable answer, so this cannot be approved.',
+  OUTPUT_VERDICT_INCONSISTENT: 'The independent check returned an unusable answer, so this cannot be approved.',
+  OUTPUT_UNKNOWN_LEG: 'The independent check returned an unusable answer, so this cannot be approved.',
+  OUTPUT_EVIDENCE_INVALID: 'The independent check returned an unusable answer, so this cannot be approved.',
+  INPUT_HASH_MISMATCH: 'The independent check saw a different version of this draft, so it cannot be approved. Please try again.',
   CONTEXT_LIMIT_RESTATE:
     'This conversation is too long to check safely. Please start a new conversation and say the whole request in one message.',
   EXTRACTOR_UNAVAILABLE: 'The assistant that prepares drafts is unavailable right now.',

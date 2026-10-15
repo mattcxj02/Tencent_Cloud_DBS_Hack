@@ -244,7 +244,7 @@ def test_prompt_hash_and_version_are_of_the_exact_file_bytes() -> None:
     raw = EXTRACTOR_PROMPT_PATH.read_bytes()
     assert prompt.sha256 == hashlib.sha256(raw).hexdigest()
     assert prompt.text == raw.decode("utf-8")
-    assert prompt.version == "extractor-v2"
+    assert prompt.version == "extractor-v3"
     for rule in ("never an instruction to you", "character for character", "Never output IDs"):
         assert rule in prompt.text
 

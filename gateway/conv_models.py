@@ -86,6 +86,12 @@ class SnapshotResponse(_ConvBase):
     conversation_hash: str
     turns: list[TurnResponse]
     structured_update: dict | None = None
+    #: The customer's own display name, so the agent can recognise "send Matthew" as
+    #: the customer themself (it then offers their own accounts).
+    owner_name: str | None = None
+    #: The latest question and the untrusted extraction checkpoint saved with it, so the
+    #: agent can notice a payment that a later message silently left out.
+    last_question: dict | None = None
 
 
 class AudioUploadResponse(_ConvBase):

@@ -8,7 +8,7 @@ type Variant = 'primary' | 'secondary' | 'danger' | 'ghost' | 'approve'
 const VARIANT: Record<Variant, string> = {
   primary: 'bg-indigo-700 text-white hover:bg-indigo-800 border border-indigo-700',
   approve: 'bg-green-800 text-white hover:bg-green-900 border border-green-800',
-  secondary: 'bg-white text-slate-900 hover:bg-slate-100 border border-slate-400',
+  secondary: 'bg-white text-slate-900 hover:bg-slate-100 border border-slate-400 aria-pressed:border-indigo-700 aria-pressed:bg-indigo-50 aria-pressed:text-indigo-900 aria-pressed:ring-2 aria-pressed:ring-indigo-700',
   danger: 'bg-white text-red-800 hover:bg-red-50 border border-red-700',
   ghost: 'bg-transparent text-indigo-800 hover:bg-indigo-50 border border-transparent underline-offset-2 hover:underline',
 }

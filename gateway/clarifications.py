@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import uuid
+from decimal import Decimal
 from typing import Any
 
 from gateway.audit import append_audit
@@ -110,27 +111,50 @@ def prepare_fields(
                     "label": record_label(conn, user_id, c.target_type, c.record_id),
                 }
             )
-        result.append(
-            {
-                "field_id": uuid.uuid4().hex,
-                "leg_id": f.leg_id,
-                "field": f.field,
-                "prompt": f.prompt,
-                "choices": choices,
-            }
-        )
+        prepared = {
+            "field_id": uuid.uuid4().hex,
+            "leg_id": f.leg_id,
+            "field": f.field,
+            "prompt": f.prompt,
+            "choices": choices,
+        }
+        if f.field == "source" and f.amount is not None:
+            prepared["amount"] = f.amount
+        result.append(prepared)
     return result
 
 
-def public_question(q: dict) -> dict:
+def _balances(conn: sqlite3.Connection, user_id: str) -> dict[str, int]:
+    rows = conn.execute(
+        "SELECT a.account_id, a.balance_cents FROM accounts a JOIN account_holders h "
+        "ON h.account_id = a.account_id WHERE h.user_id = ?",
+        (user_id,),
+    ).fetchall()
+    return {r["account_id"]: int(r["balance_cents"]) for r in rows}
+
+
+def _public_choice(c: dict, amount: str | None, balances: dict[str, int]) -> dict:
+    """A choice as the customer sees it. The balance is read live and is display only:
+    it is never part of the frozen label, so a balance change cannot break the answer."""
+    out = {"choice_id": c["choice_id"], "label": c["label"]}
+    cents = balances.get(c["record_id"]) if c["target_type"] == TargetType.own_account else None
+    if cents is not None:
+        out["available"] = f"{Decimal(cents) / 100:.2f}"
+        if amount is not None and Decimal(cents) < Decimal(amount) * 100:
+            out["insufficient"] = True
+    return out
+
+
+def public_question(
+    q: dict, conn: sqlite3.Connection | None = None, user_id: str | None = None
+) -> dict:
+    balances = _balances(conn, user_id) if conn is not None and user_id else {}
     return {
         "revision": q["revision"],
         "fields": [
             {
                 **f,
-                "choices": [
-                    {"choice_id": c["choice_id"], "label": c["label"]} for c in f["choices"]
-                ],
+                "choices": [_public_choice(c, f.get("amount"), balances) for c in f["choices"]],
             }
             for f in q["fields"]
         ],
@@ -205,6 +229,21 @@ def selected_answer(
         )
         text += "; "
     return text.rstrip("; "), chosen
+
+
+def last_question(conn: sqlite3.Connection, conversation_id: str) -> dict | None:
+    """The latest question's turn ID and its saved (untrusted) extraction, if any."""
+    row = conn.execute(
+        "SELECT turn_id FROM conversation_turns WHERE conversation_id = ? "
+        "AND role = 'app_question' ORDER BY seq DESC LIMIT 1",
+        (conversation_id,),
+    ).fetchone()
+    if row is None:
+        return None
+    q = question(conn, conversation_id, row["turn_id"])
+    if q is None or q.get("extraction") is None:
+        return None
+    return {"turn_id": row["turn_id"], "extraction": q["extraction"]}
 
 
 def structured_update(conn: sqlite3.Connection, conversation_id: str, revision: int) -> dict | None:

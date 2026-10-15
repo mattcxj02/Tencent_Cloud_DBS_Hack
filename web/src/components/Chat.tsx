@@ -409,6 +409,7 @@ export function ChatPage() {
         onStartEdit={setEditingTurnId}
         onCancelEdit={() => setEditingTurnId(null)}
         onSaveEdit={saveEdit}
+        openQuestionId={flow.kind === 'clarify' ? flow.question.turn_id : undefined}
         onExample={facilitator ? undefined : (text) => {
           setComposerText(text)
           document.getElementById('composer-input')?.focus()

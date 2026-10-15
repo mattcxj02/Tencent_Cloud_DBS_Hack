@@ -632,7 +632,7 @@ class ConversationStore:
                 "extraction": extraction,
             }
             C.save_question(conn, conversation_id, conv_row["owner_user_id"], q)
-            result["clarification"] = C.public_question(q)
+            result["clarification"] = C.public_question(q, conn, conv_row["owner_user_id"])
             check_run(run_id, conn)
             conn.commit()
             return result
@@ -792,8 +792,11 @@ class ConversationStore:
             if conv_row is None:
                 return None
             turns = self._get_turns(conn, conversation_id)
-            from gateway.clarifications import structured_update
+            from gateway.clarifications import last_question, structured_update
 
+            owner = conn.execute(
+                "SELECT display_name FROM users WHERE user_id = ?", (conv_row["owner_user_id"],)
+            ).fetchone()
             return {
                 "conversation_id": conv_row["conversation_id"],
                 "revision": int(conv_row["revision"]),
@@ -802,6 +805,8 @@ class ConversationStore:
                 "structured_update": structured_update(
                     conn, conversation_id, int(conv_row["revision"])
                 ),
+                "owner_name": owner["display_name"] if owner else None,
+                "last_question": last_question(conn, conversation_id),
             }
         finally:
             conn.close()

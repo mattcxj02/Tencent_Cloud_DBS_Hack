@@ -141,7 +141,10 @@ export interface ClarificationQuestion {
       leg_id: string
       field: 'target' | 'source'
       prompt: string
-      choices: { choice_id: string; label: string }[]
+      /** A source field's literal amount ("50.00"), when the payment has one. */
+      amount?: string
+      /** `available` is a live own-account balance (display only, not part of the label). */
+      choices: { choice_id: string; label: string; available?: string; insufficient?: boolean }[]
     }[]
   }
 }

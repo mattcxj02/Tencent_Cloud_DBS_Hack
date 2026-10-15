@@ -267,7 +267,9 @@ def _owned_conversation(conn: sqlite3.Connection, user_id: str, conversation_id:
     return int(row["revision"])
 
 
-def _question(conn: sqlite3.Connection, conversation_id: str, outcome: dict) -> dict[str, Any]:
+def _question(
+    conn: sqlite3.Connection, user_id: str, conversation_id: str, outcome: dict
+) -> dict[str, Any]:
     """The clarifying question as the gateway stored it (role ``app_question``)."""
     turn_id = outcome.get("question_turn_id")
     row = conn.execute(
@@ -282,7 +284,7 @@ def _question(conn: sqlite3.Connection, conversation_id: str, outcome: dict) -> 
     stored = question(conn, conversation_id, row["turn_id"])
     result = {"turn_id": row["turn_id"], "text": row["text"]}
     if stored is not None:
-        result["clarification"] = public_question(stored)
+        result["clarification"] = public_question(stored, conn, user_id)
     return result
 
 
@@ -396,7 +398,7 @@ def _run(work: DraftWork, *, validation_only: bool = False) -> dict[str, Any]:
             if status == "clarify":
                 return {
                     "status": "clarify",
-                    "question": _question(conn, work.conversation_id, outcome),
+                    "question": _question(conn, work.user_id, work.conversation_id, outcome),
                     "conversation_revision": work.revision,
                 }
             draft, current = _frozen_draft(

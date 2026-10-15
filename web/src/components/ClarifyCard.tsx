@@ -1,24 +1,30 @@
 // One short clarification question. If it ends with a list of options
 // ("Which John do you mean: John Doe (account ending 4521) or John Tan (...)?") the
 // options become chips; tapping one sends it as the answer. Typing still works.
-// A "Did you mean …?" question (a near spelling such as "mom" for "Mum") also offers to
-// remember the customer's words as a nickname for the payee they pick.
+// A "Did you mean …?" or "I couldn't find …" question (a near spelling such as "mom" for
+// "Mum", or a name that matches no one) also offers to remember the customer's words as a
+// nickname for the payee they pick. Account choices show the live available balance.
 import { useEffect, useRef, useState } from 'react'
 import { api, ApiError } from '../api'
 import type { ClarificationQuestion, Payee, StructuredAnswer } from '../api'
 import { describeCode } from '../messages'
+import { formatMoney } from '../money'
 import { useAnnounce } from '../session'
 import { Button, Card, Notice } from './ui'
 
+type Choice = NonNullable<ClarificationQuestion['clarification']>['fields'][number]['choices'][number]
+
 const MAX_OPTIONS = 6
 const MAX_OPTION_LEN = 80
-/** Must match agent/questions.py (recipient_did_you_mean). */
-const DID_YOU_MEAN = /^I couldn't find “([^”…]+)” exactly\. Did you mean: /
+/** Must match agent/questions.py (recipient_did_you_mean and recipient_not_found). */
+const UNKNOWN_NAME = /^I couldn't find “([^”…]+)” (?:exactly\. Did you mean: |among your saved payees)/
 
 /** Options after the last ": " of a question ending in "?", joined by ", " and " or ". */
 export function choiceOptions(question: string): string[] {
   const text = question.trim()
   if (!text.endsWith('?')) return []
+  // A grouped question has one line per payment; its last list answers only the last line.
+  if (text.includes('\n')) return []
   const colon = text.lastIndexOf(': ')
   if (colon === -1) return []
   const list = text.slice(colon + 2, -1)
@@ -28,9 +34,23 @@ export function choiceOptions(question: string): string[] {
   return parts
 }
 
-/** The customer's words in a "Did you mean …?" question, or null for other questions. */
+/** The customer's words in a "Did you mean …?" or "I couldn't find …" question, else null. */
 export function suggestedWords(question: string): string | null {
-  return DID_YOU_MEAN.exec(question.trim())?.[1] ?? null
+  return UNKNOWN_NAME.exec(question.trim())?.[1] ?? null
+}
+
+/** A choice's label, plus the account's available balance when the gateway sent one. */
+function ChoiceText({ label, choice }: { label: string; choice?: Choice }) {
+  if (!choice?.available) return <>{label}</>
+  const money = formatMoney(choice.available)
+  return (
+    <span className="flex flex-col items-start text-left">
+      <span>{label}</span>
+      <span className="text-sm font-normal">
+        {choice.insufficient ? `${money} available, may not cover this payment` : `${money} available`}
+      </span>
+    </span>
+  )
 }
 
 /** The agent's label for a saved payee (agent/names.py payee_record). */
@@ -52,6 +72,8 @@ export function ClarifyCard({
   const announce = useAnnounce()
   useEffect(() => headingRef.current?.focus(), [question.turn_id])
   const fields = question.clarification?.fields ?? []
+  // "Payment 2: Pay from" only helps when the choices are about more than one payment.
+  const severalPayments = new Set(fields.map((f) => f.leg_id)).size > 1
   const options = fields.length === 1 ? fields[0].choices.map((c) => c.label) : choiceOptions(question.text)
   const words = suggestedWords(question.text)
 
@@ -112,13 +134,16 @@ export function ClarifyCard({
       <p className="whitespace-pre-line text-lg text-slate-900">{question.text}</p>
       {fields.length > 1 && fields.map((f) => (
         <fieldset key={f.field_id} className="mt-3">
-          <legend className="font-medium">Payment {f.leg_id.slice(4)}: {f.field === 'target' ? 'Recipient' : 'Pay from'}</legend>
+          <legend className="font-medium">
+            {severalPayments && `Payment ${f.leg_id.slice(4)}: `}{f.field === 'target' ? 'Recipient' : 'Pay from'}
+          </legend>
           <div className="mt-2 flex flex-wrap gap-2">
             {f.choices.map((c) => (
               <Button key={c.choice_id} variant="secondary" disabled={disabled || saving}
                 aria-pressed={selected[f.field_id] === c.choice_id}
                 onClick={() => setSelected((prev) => ({ ...prev, [f.field_id]: c.choice_id }))}>
-                {c.label}
+                {selected[f.field_id] === c.choice_id && <span aria-hidden="true">✓</span>}
+                <ChoiceText label={c.label} choice={c} />
               </Button>
             ))}
           </div>
@@ -134,17 +159,20 @@ export function ClarifyCard({
       )}
       {fields.length <= 1 && options.length > 0 && (
         <div role="group" aria-label="Choose an answer" className="mt-3 flex flex-wrap gap-2">
-          {options.map((opt, index) => (
-            <Button
-              key={fields[0]?.choices[index]?.choice_id ?? opt}
-              variant="secondary"
-              disabled={disabled || saving}
-              onClick={() => void choose(opt, fields[0]?.choices[index]?.choice_id)}
-              className="rounded-full"
-            >
-              {opt}
-            </Button>
-          ))}
+          {options.map((opt, index) => {
+            const choice = fields[0]?.choices[index]
+            return (
+              <Button
+                key={choice?.choice_id ?? opt}
+                variant="secondary"
+                disabled={disabled || saving}
+                onClick={() => void choose(opt, choice?.choice_id)}
+                className={choice?.available ? '' : 'rounded-full'}
+              >
+                <ChoiceText label={opt} choice={choice} />
+              </Button>
+            )
+          })}
         </div>
       )}
       {fields.length > 0 && (
@@ -162,7 +190,7 @@ export function ClarifyCard({
             disabled={disabled || saving}
             onChange={(e) => setRemember(e.target.checked)}
           />
-          Also remember “{words}” as a nickname for the payee I pick
+          Also remember “{words}” as a nickname for the payee I pick (saved payees only)
         </label>
       )}
       {error && (

@@ -21,6 +21,9 @@ class QuestionField(_Base):
     field: Literal["target", "source"]
     prompt: str = Field(min_length=1, max_length=500)
     candidates: list[Candidate] = Field(min_length=1, max_length=100)
+    #: The leg's literal amount, for a source field only. Advisory: it marks accounts whose
+    #: live balance cannot cover it; the gateway's own funds check still applies.
+    amount: str | None = Field(default=None, pattern=r"^\d{1,9}\.\d{2}$")
 
 
 class Selection(_Base):

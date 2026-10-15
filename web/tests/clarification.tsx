@@ -11,8 +11,13 @@ const results = document.getElementById('results')!
 const root = createRoot(host)
 const answers: (string | StructuredAnswer)[] = []
 const requests: Record<string, unknown>[] = []
+const PAYEES = [{ payee_id: 'payee-ahma', display_name: 'Ah Ma', bank: 'POSB', masked_suffix: '7766',
+  kind: 'bank', aliases: [], nicknames: [] }]
 window.fetch = async (_input, init) => {
-  requests.push(JSON.parse(String(init?.body)))
+  if (!init?.body) {  // GET /payees, for the nickname offer
+    return new Response(JSON.stringify(PAYEES), { status: 200, headers: { 'Content-Type': 'application/json' } })
+  }
+  requests.push(JSON.parse(String(init.body)))
   return new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } })
 }
 
@@ -48,8 +53,11 @@ async function render(q: ClarificationQuestion, disabled = false) {
 async function runTests() {
   const passed: string[] = []
   await render(question)
+  check([...host.querySelectorAll('legend')].map((l) => l.textContent).join('|') === 'Recipient|Pay from',
+    'One payment must not number its choice groups')
   check(button('Use these choices').disabled, 'Incomplete group must not submit')
   await act(async () => button('Mum (account ending 9988)').click())
+  check(host.querySelector('[aria-pressed="true"]')?.textContent === '✓Mum (account ending 9988)', 'Selected choice must be marked')
   check(button('Use these choices').disabled && answers.length === 0, 'First choice must wait for source')
   await act(async () => button('Current (account ending 5678)').click())
   check(!button('Use these choices').disabled, 'Complete group must allow submission')
@@ -95,6 +103,40 @@ async function runTests() {
   await act(async () => button('Savings').click())
   check(answers.pop() === 'Savings', 'Legacy questions must still allow text answers')
   passed.push('Legacy option chips remain compatible')
+
+  await render({ turn_id: 'grouped-text', text: 'Payment 1: Who should I pay?\nPayment 1: Which account: Savings or Current?' })
+  check(!host.querySelector('[aria-label="Choose an answer"]'), 'Grouped text must not offer chips for its last line only')
+  passed.push('Grouped free-text questions offer no partial chips')
+
+  await render({ turn_id: 'balances', text: 'Which account?', clarification: { revision: 9, fields: [
+    { field_id: 'source-3', leg_id: 'leg-3', field: 'source', prompt: 'Which account?', amount: '3000.00', choices: [
+      { choice_id: 'joint', label: 'joint (account ending 9012)', available: '2000.00', insufficient: true },
+      { choice_id: 'current', label: 'current (account ending 5678)', available: '3500.00' },
+    ] },
+  ] } })
+  const [short, enough] = [...host.querySelectorAll<HTMLButtonElement>('[aria-label="Choose an answer"] button')]
+  // Advisory only: an earlier payment in the same request may top the account up.
+  check(!short.disabled && short.textContent?.includes('SGD 2,000.00 available, may not cover this payment'),
+    'An account that may not cover the amount must say so but stay selectable')
+  check(!enough.disabled && enough.textContent?.includes('SGD 3,500.00 available'), 'Balance must show')
+  await act(async () => enough.click())
+  const balanceAnswer = answers.pop()
+  check(typeof balanceAnswer === 'object' && balanceAnswer.selections[0].choice_id === 'current',
+    'Balance details must not change the submitted choice')
+  passed.push('Account choices show balances and flag short accounts')
+
+  await render({ turn_id: 'not-found-2',
+    text: "I couldn't find “Joy” among your saved payees, billers or accounts. Who should I pay? I can only pay saved payees or your own accounts.",
+    clarification: { revision: 10, fields: [
+      { field_id: 'target-4', leg_id: 'leg-1', field: 'target', prompt: 'Who?', choices: [
+        { choice_id: 'ahma', label: 'Ah Ma (account ending 7766)' },
+        { choice_id: 'savings', label: 'savings (account ending 1234)' },
+      ] },
+    ] } })
+  await act(async () => { await new Promise((r) => setTimeout(r, 0)) })
+  check(host.textContent?.includes('Also remember “Joy” as a nickname for the payee I pick (saved payees only)'),
+    'A not-found question must offer to remember the words')
+  passed.push('Not-found questions offer to remember a nickname')
 
   results.textContent = `${passed.length} PASS\n${passed.join('\n')}`
 }

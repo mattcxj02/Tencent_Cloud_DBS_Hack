@@ -24,6 +24,8 @@ class Issue:
     leg: int | None = None
     field: str | None = None
     candidates: list[dict[str, Any]] = dc_field(default_factory=list)
+    #: A source question's literal amount ("50.00"), so the card can mark short accounts.
+    amount: str | None = None
 
 
 def quote_words(text: str) -> str:
@@ -118,6 +120,30 @@ def recipient_did_you_mean(words: str, options: Sequence[str]) -> str:
     return (
         f"I couldn't find {quote_words(words)} exactly. "
         f"Did you mean: {join_options([*options, NONE_OF_THESE])}?"
+    )
+
+
+def recipient_own_name(words: str) -> str:
+    return (
+        f"{quote_words(words)} is your own name. "
+        "Did you mean one of your own accounts? Choose one below, or tell me who to pay."
+    )
+
+
+#: Added when the recipient words came from speech, which may have been misheard.
+MISHEARD_HINT = "If I misheard you, tap “Correct this transcript” above."
+
+
+def payments_dropped(payments: Sequence[str]) -> str:
+    """Earlier payments the latest message no longer mentions. The answers are chips."""
+    if len(payments) == 1:
+        return (
+            f"Your latest message didn't mention {payments[0]}. "
+            "Should I still make it: Keep it or Leave it out?"
+        )
+    return (
+        f"Your latest message didn't mention {', '.join(payments[:-1])} and {payments[-1]}. "
+        "Should I still make them: Keep them or Leave them out?"
     )
 
 

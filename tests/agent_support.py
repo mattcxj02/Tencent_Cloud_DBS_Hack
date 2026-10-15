@@ -116,6 +116,8 @@ class FakeGateway:
         self.requests: list[httpx.Request] = []
         self.fail_snapshot: int | None = None
         self.nicknames: dict[str, str] = dict(NICKNAMES)
+        #: Question bodies the agent proposed (fields, extraction checkpoint), by turn ID.
+        self.question_bodies: dict[str, dict[str, Any]] = {}
 
     # ── user side (what the browser would append via /api) ──────────
 
@@ -136,6 +138,9 @@ class FakeGateway:
 
     def say(self, text: str) -> dict[str, Any]:
         return self._append("user_text", text)
+
+    def speak(self, text: str) -> dict[str, Any]:
+        return self._append("user_asr_final", text)
 
     def edit(self, turn_id: str, text: str) -> dict[str, Any]:
         return self._append("user_transcript_edit", text, edits_turn_id=turn_id)
@@ -165,7 +170,9 @@ class FakeGateway:
                 return httpx.Response(self.fail_snapshot, json={"detail": "not found"})
             return httpx.Response(200, json=self.snapshot())
         if method == "POST" and path == f"{conv}/questions":
-            return httpx.Response(200, json=self._append("app_question", body["text"]))
+            turn = self._append("app_question", body["text"])
+            self.question_bodies[turn["turn_id"]] = body
+            return httpx.Response(200, json=turn)
         if method == "POST" and path == "/internal/audit/agent-events":
             if not body["step"].startswith("agent."):
                 return httpx.Response(403, json={"detail": "forbidden step"})
@@ -179,6 +186,10 @@ class FakeGateway:
             query = parse_qs(request.url.query.decode())["q"][0]
             self.searches.append(query)
             return httpx.Response(200, json=self.search(query))
+        if method == "GET" and path == "/internal/bank/payees":
+            return httpx.Response(
+                200, json=[{**p, "names": self.names_of(p["payee_id"])} for p in PAYEES]
+            )
         if method == "GET" and path == "/internal/bank/billers":
             return httpx.Response(200, json=BILLERS)
         if method == "GET" and path == "/internal/bank/cards":
@@ -199,7 +210,16 @@ class FakeGateway:
             "revision": self.revision,
             "conversation_hash": f"hash-{self.revision}",
             "turns": self.turns,
+            "owner_name": "Matthew",
+            "last_question": self._last_question(),
         }
+
+    def _last_question(self) -> dict[str, Any] | None:
+        if not self.questions:
+            return None
+        turn_id = self.questions[-1]["turn_id"]
+        extraction = self.question_bodies.get(turn_id, {}).get("extraction")
+        return {"turn_id": turn_id, "extraction": extraction} if extraction else None
 
     def names_of(self, payee_id: str) -> list[str]:
         return [n for n, pid in {**ALIASES, **self.nicknames}.items() if pid == payee_id]

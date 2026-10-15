@@ -118,6 +118,7 @@ export function Transcript({
   onCancelEdit,
   onSaveEdit,
   onExample,
+  openQuestionId,
 }: {
   turns: VisibleTurn[]
   editingTurnId: string | null
@@ -126,6 +127,8 @@ export function Transcript({
   onCancelEdit: () => void
   onSaveEdit: (turnId: string, text: string) => void
   onExample?: (text: string) => void
+  /** The question the clarification card is showing; it is left out here so it appears once. */
+  openQuestionId?: string
 }) {
   if (turns.length === 0) {
     return (
@@ -155,7 +158,7 @@ export function Transcript({
   }
   return (
     <ol className="space-y-3" aria-label="Conversation">
-      {turns.map((v) => {
+      {turns.filter((v) => v.current.turn_id !== openQuestionId).map((v) => {
         const isUser = v.current.role !== 'app_question'
         const edited = v.versions.length > 1
         const editing = editingTurnId === v.current.turn_id

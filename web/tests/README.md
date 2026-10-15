@@ -1,9 +1,9 @@
 # Clarification browser regressions
 
-`clarification.html` runs six browser checks against the real `ClarifyCard` and API
+`clarification.html` runs nine browser checks against the real `ClarifyCard` and API
 serializer with synthetic records and a stubbed `fetch`. It covers grouped selection,
 question/field/leg/revision bindings, question reset/focus, none-of-these fallback,
-single-choice IDs, disabled submission and legacy chips. No gateway, model, session,
+single-choice IDs, disabled submission, legacy chips, grouped free-text questions, account balances on choices and the nickname offer after a not-found name. No gateway, model, session,
 passkey, microphone or ledger is used; this fixture is outside the production entry.
 
 From `web/`, run:
@@ -14,7 +14,7 @@ npm run dev -- --host 127.0.0.1
 ```
 
 Open `http://localhost:5173/tests/clarification.html`; the page must show
-`6 PASS`. No extra dependencies are required. This is a browser fixture, not a full
+`9 PASS`. No extra dependencies are required. This is a browser fixture, not a full
 payment/voice walkthrough or a headless CI runner.
 
 ## Progress and recovery

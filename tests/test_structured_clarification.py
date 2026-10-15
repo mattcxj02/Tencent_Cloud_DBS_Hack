@@ -438,3 +438,74 @@ def test_gateway_independently_checks_selection_provenance_at_freeze(o: Orch, at
     assert r.status_code == 400, r.text
     assert r.json()["detail"] in ("SELECTION_BINDING_INVALID", "SELECTION_REVISION_INVALID")
     assert not o.v.q("SELECT bundle_id FROM frozen_drafts WHERE conversation_id = ?", (conv,))
+
+
+def test_account_choices_show_live_balances_and_mark_short_accounts(o: Orch) -> None:
+    conn = connect(o.env.db_path)
+    try:
+        balances = {
+            r["type"]: r["balance_cents"]
+            for r in conn.execute(
+                "SELECT a.type, a.balance_cents FROM accounts a JOIN account_holders h "
+                "ON h.account_id = a.account_id WHERE h.user_id = 'user-matthew'"
+            )
+        }
+    finally:
+        conn.close()
+    # An amount between the smallest and largest balance, so some accounts are short.
+    cents = sorted(balances.values())
+    amount = (cents[0] + cents[-1]) // 200
+    conv = o.conversation(f"Send ${amount} to Mum")
+    o.extractor(reply(intent("transfer", f"${amount}", "Mum")))
+    question = o.drafted(conv)["question"]
+    [source] = [f for f in question["clarification"]["fields"] if f["field"] == "source"]
+    assert source["amount"] == f"{amount}.00"
+    for choice in source["choices"]:
+        kind = choice["label"].split(" ")[0]
+        assert choice["available"] == f"{balances[kind] / 100:.2f}"
+        assert choice.get("insufficient", False) == (balances[kind] < amount * 100)
+    assert any(c.get("insufficient") for c in source["choices"])
+    assert not all(c.get("insufficient") for c in source["choices"])
+    # The live balance is display only: the frozen label is unchanged and still answers.
+    assert all("available" not in c["label"] for c in source["choices"])
+
+
+def test_snapshot_carries_owner_name_and_last_question_checkpoint(o: Orch) -> None:
+    from gateway.conv_routes import get_conversation_store
+
+    conv, question = grouped(o)
+    snapshot = get_conversation_store().get_snapshot(conv)
+    assert snapshot["owner_name"] == "Matthew"
+    assert snapshot["last_question"]["turn_id"] == question["turn_id"]
+    assert snapshot["last_question"]["extraction"]["intents"][0]["amount_quote"] == "$50"
+
+
+def test_unknown_name_choices_resolve_recipient_and_account_in_one_answer(o: Orch) -> None:
+    conv = o.conversation("Send $15 to Joy")
+    o.extractor(reply(intent("transfer", "$15", "Joy")))
+    question = o.drafted(conv)["question"]
+    fields = question["clarification"]["fields"]
+    assert [f["field"] for f in fields] == ["target", "source"]
+    response = answer(o, conv, answer_body(question, ("Mum", "savings")))
+    assert response.status_code == 200, response.text
+    result = o.drafted(conv)
+    assert result["status"] == "ready", result
+    assert result["legs"][0]["display_name"] == "Mum"
+
+
+def test_own_name_choices_become_an_own_account_transfer(o: Orch) -> None:
+    conv = o.conversation("Send Matthew $15")
+    o.extractor(reply(intent("transfer", "$15", "Matthew")))
+    question = o.drafted(conv)["question"]
+    assert question["text"].startswith("“Matthew” is your own name.")
+    response = answer(o, conv, answer_body(question, ("savings", "current")))
+    assert response.status_code == 200, response.text
+    result = o.drafted(conv)
+    assert result["status"] == "ready", result
+    bundle = o.env.drafts.get_draft(result["bundle_id"], "user-matthew")
+    assert bundle is not None
+    [leg] = bundle.legs
+    assert (leg.target_id, leg.source_account_id) == (
+        "acct-matthew-savings",
+        "acct-matthew-current",
+    )

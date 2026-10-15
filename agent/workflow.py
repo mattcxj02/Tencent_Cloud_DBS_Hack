@@ -31,7 +31,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any, TypedDict
 
 from langgraph.graph import END, START, StateGraph
@@ -154,6 +154,11 @@ class AgentState(TypedDict, total=False):
     issue: Issue | None
     issues: list[Issue]
     selections: list[dict[str, Any]]
+    owner_name: str | None
+    #: The latest question's turn ID and the extraction saved with it (untrusted).
+    last_question: tuple[str, ExtractorOutput] | None
+    #: The extraction to save with this question when it is not the current one.
+    checkpoint: ExtractorOutput
     error: str
     outcome: dict[str, Any]
 
@@ -350,6 +355,91 @@ def _earlier_named_by(referent: str, earlier: list[LegPlan]) -> list[LegPlan]:
     return [e for e in earlier if e.recipient_span and mentions(referent, [e.recipient_span.text])]
 
 
+# ── Payments a later message left out ─────────────────────────────────
+
+#: Words that show the customer meant to change or cancel something, so a payment their
+#: new message leaves out was replaced on purpose and is not asked about again.
+_CHANGE_WORDS = frozenset(
+    {
+        "actually",
+        "instead",
+        "rather",
+        "change",
+        "changed",
+        "make",
+        "no",
+        "not",
+        "sorry",
+        "mean",
+        "meant",
+        "wait",
+        "cancel",
+        "forget",
+        "scrap",
+        "skip",
+        "drop",
+        "remove",
+        "never",
+        "don't",
+        "dont",
+        "stop",
+        "only",
+        "replace",
+        "correction",
+        "leave",
+    }
+)
+
+
+def dropped_payments(
+    turns: list[VisibleTurn], question_turn_id: str, before: ExtractorOutput, now: ExtractorOutput
+) -> list[ExtractedIntent]:
+    """Payments read before the latest question that the latest messages silently drop.
+
+    A payment counts as dropped only if its recipient words are still in the conversation
+    before the question (a transcript correction did not remove them), no current payment
+    keeps its recipient or its amount words (a new name with the same amount is an answer
+    or a correction), and no message after the question mentions the recipient or uses a
+    change word ("actually", "instead", "cancel", ...). Then the agent asks instead of
+    guessing, so the conversation itself says whether the payment was cancelled.
+    """
+    ids = [t.turn_id for t in turns]
+    if question_turn_id not in ids or len(before.intents) > MAX_LEGS:
+        return []  # A "which 4 first?" question leaves payments out on purpose.
+    cut = ids.index(question_turn_id)
+    earlier = [t.text for t in turns[:cut] if t.is_user]
+    later = [t.text for t in turns[cut + 1 :] if t.is_user]
+    if not later:
+        return []
+    later_words = {
+        w for text in later for w in re.findall(r"[a-z']+", text.casefold().replace("’", "'"))
+    }
+    if later_words & _CHANGE_WORDS:
+        return []
+    kept = [i.recipient_quote for i in now.intents if i.recipient_quote]
+    amounts = {_norm(i.amount_quote) for i in now.intents if i.amount_quote}
+    dropped = []
+    for intent in before.intents:
+        who = intent.recipient_quote
+        if not who or not any(mentions(text, [who]) for text in earlier):
+            continue
+        if any(mentions(k, [who]) or mentions(who, [k]) for k in kept):
+            continue
+        if intent.amount_quote and _norm(intent.amount_quote) in amounts:
+            continue
+        if any(mentions(text, [who]) for text in later):
+            continue
+        dropped.append(intent)
+    return dropped
+
+
+def _dropped_label(intent: ExtractedIntent) -> str:
+    who = Q.quote_words(intent.recipient_quote or "")
+    if intent.amount_quote:
+        return f"the payment of {Q.quote_words(intent.amount_quote)} to {who}"
+    return f"the payment to {who}"
+
+
 # ── Bank lookups ──────────────────────────────────────────────────────
 
 
@@ -363,6 +453,8 @@ class _Bank:
         self._cards: list[Record] | None = None
         self._payees: dict[str, tuple[dict[str, Any], set[str]]] = {}
         self._searched: set[str] = set()
+        #: The customer's own display name (from the snapshot), if known.
+        self.owner_name: str | None = None
 
     def accounts(self) -> list[Record]:
         if self._accounts is None:
@@ -423,6 +515,9 @@ def _norm(text: str) -> str:
 
 #: At most this many "Did you mean …?" options (plus "someone else").
 MAX_SUGGESTIONS = 3
+#: A question field offers at most this many records (shared/clarification.py); a
+#: longer not-found list becomes a free-text question instead.
+MAX_CHOICES = 100
 
 
 def _records_for(action: Action, bank: _Bank) -> list[Record]:
@@ -481,7 +576,21 @@ def _resolve_target(plan: LegPlan, bank: _Bank) -> Issue | None:
         if near:
             question = Q.recipient_did_you_mean(words, [r.label for r in near])
             return _choice_issue("RECIPIENT_SUGGEST", question, plan, "target", near)
-        return Issue("RECIPIENT_NOT_FOUND", Q.recipient_not_found(words, options), plan.index)
+        if (
+            plan.action is Action.transfer
+            and bank.owner_name
+            and _norm(words) == _norm(bank.owner_name)
+        ):
+            # "Send Matthew 30" from Matthew: offer their own accounts.
+            return _choice_issue(
+                "RECIPIENT_OWN_NAME", Q.recipient_own_name(words), plan, "target", bank.accounts()
+            )
+        if plan.action is Action.transfer:
+            pool = bank.accounts() + bank.all_payees()
+        question = Q.recipient_not_found(words, options)
+        if 0 < len(pool) <= MAX_CHOICES:
+            return _choice_issue("RECIPIENT_NOT_FOUND", question, plan, "target", pool)
+        return Issue("RECIPIENT_NOT_FOUND", question, plan.index)
     if plan.selected_target_id:
         candidates = [c for c in candidates if c.record_id == plan.selected_target_id]
         if not candidates:
@@ -503,12 +612,14 @@ def _resolve_target(plan: LegPlan, bank: _Bank) -> Issue | None:
     return None
 
 
-def _resolve_source(plan: LegPlan, bank: _Bank) -> Issue | None:
+def _resolve_source(plan: LegPlan, bank: _Bank, *, unnamed: bool = False) -> Issue | None:
     accounts = bank.accounts()
     labels = [a.label for a in accounts]
     if plan.source_span is None:
+        # While the recipient is unknown, do not repeat the unknown name ("the transfer to Joy").
+        payment = "this payment" if unnamed else plan.name()
         return _choice_issue(
-            "SOURCE_MISSING", Q.source_missing(plan.name(), labels), plan, "source", accounts
+            "SOURCE_MISSING", Q.source_missing(payment, labels), plan, "source", accounts
         )
     words = plan.source_span.text
     matches = match_records(words, accounts)
@@ -540,13 +651,24 @@ def _resolve_source(plan: LegPlan, bank: _Bank) -> Issue | None:
 def _choice_issue(
     code: str, question: str, plan: LegPlan, field: str, records: list[Record]
 ) -> Issue:
+    amount = None
+    if field == "source" and isinstance(plan.amount, LiteralAmount):
+        amount = plan.amount.amount.to_str()
     return Issue(
         code,
         question,
         plan.index,
         field,
         [{"record_id": r.record_id, "target_type": _TARGET_TYPES[r.kind].value} for r in records],
+        amount,
     )
+
+
+#: Recipient questions where the recipient is still unknown: the source account is asked
+#: about only once the customer has said who to pay.
+_UNKNOWN_TARGET = frozenset(
+    {"RECIPIENT_NOT_FOUND", "RECIPIENT_SUGGEST", "RECIPIENT_OWN_NAME", "RECIPIENT_UNCITABLE"}
+)
 
 
 def _resolve_amount(plan: LegPlan, plans: list[LegPlan], bank: _Bank) -> Issue | None:
@@ -654,6 +776,17 @@ class _Nodes:
             return {"error": "NO_USER_INPUT"}
         if len(turns) > MAX_CONTEXT_TURNS or sum(len(t.text) for t in turns) > MAX_CONTEXT_CHARS:
             return {"error": "CONTEXT_LIMIT_EXCEEDED"}
+        owner = snapshot.get("owner_name")
+        context: dict[str, Any] = {"owner_name": owner if isinstance(owner, str) else None}
+        last = snapshot.get("last_question")
+        try:
+            if last:
+                context["last_question"] = (
+                    str(last["turn_id"]),
+                    ExtractorOutput.model_validate(last["extraction"]),
+                )
+        except (KeyError, TypeError, ValueError):
+            pass  # An unusable checkpoint only skips the left-out-payment check.
         update = snapshot.get("structured_update")
         if update:
             try:
@@ -670,10 +803,11 @@ class _Nodes:
                     "turns": turns,
                     "extraction": output,
                     "selections": selections,
+                    **context,
                 }
             except (KeyError, TypeError, ValueError, IndexError):
                 pass  # An unusable checkpoint takes the full extraction path.
-        return {"revision": revision, "turns": turns}
+        return {"revision": revision, "turns": turns, **context}
 
     # extract ───────────────────────────────────────────────────────────
 
@@ -726,6 +860,16 @@ class _Nodes:
         issue = check_intents(output)
         plans: list[LegPlan] = []
         issues: list[Issue] = []
+        update: dict[str, Any] = {}
+        last = state.get("last_question")
+        if issue is None and last and not state.get("selections"):
+            dropped = dropped_payments(state["turns"], last[0], last[1], output)
+            if dropped:
+                labels = [_dropped_label(i) for i in dropped]
+                issue = Issue("PAYMENT_LEFT_OUT", Q.payments_dropped(labels))
+                # Saved with the question instead of the new reading: after "Keep it" the
+                # payment must be back, and "Leave it out" is a change word, so no loop.
+                update["checkpoint"] = last[1]
         if issue is None:
             plans, issue = normalize_plans(
                 output.intents, state["turns"], issues=issues, selections=state.get("selections")
@@ -742,7 +886,7 @@ class _Nodes:
                 "outcome": issue.code if issue else "ok",
             },
         )
-        return {"plans": plans, "issue": issue, "issues": issues}
+        return {"plans": plans, "issue": issue, "issues": issues, **update}
 
     # resolve ───────────────────────────────────────────────────────────
 
@@ -750,12 +894,28 @@ class _Nodes:
         plans = state["plans"]
         bank = _Bank(self.d.gateway)
         issues = list(state.get("issues", []))
+        bank.owner_name = state.get("owner_name")
+        roles = {t.turn_id: t.role for t in state["turns"]}
         try:
             for plan in plans:
-                for resolve in (_resolve_target, _resolve_source):
-                    issue = resolve(plan, bank)
-                    if issue is not None:
-                        issues.append(issue)
+                issue = _resolve_target(plan, bank)
+                unknown = issue is not None and issue.code in _UNKNOWN_TARGET
+                if issue is not None and unknown:
+                    span = plan.recipient_span
+                    if span is not None and roles.get(span.turn_id) == "user_asr_final":
+                        issue = replace(issue, question=f"{issue.question} {Q.MISHEARD_HINT}")
+                if issue is not None:
+                    issues.append(issue)
+                if issue is not None and unknown and not issue.candidates:
+                    # A free-text "who?" question: asking about the account for someone not
+                    # yet known would mix a typed answer with buttons. It follows afterwards.
+                    continue
+                # With recipient choices the account choices stay in the same card: a
+                # structured answer must settle both fields at once (the gateway accepts
+                # selection evidence only from the latest answer).
+                issue = _resolve_source(plan, bank, unnamed=unknown)
+                if issue is not None:
+                    issues.append(issue)
                 if plan.target and plan.source and plan.amount:
                     issue = _resolve_amount(plan, plans, bank)
                     if issue:
@@ -869,6 +1029,7 @@ class _Nodes:
                 "field": i.field,
                 "prompt": i.question[:500],
                 "candidates": i.candidates,
+                **({"amount": i.amount} if i.amount else {}),
             }
             for i in issues
             if i.leg is not None and i.field and i.candidates
@@ -876,21 +1037,28 @@ class _Nodes:
         # Only a complete group of supported record questions can resume a checkpoint.
         if len(fields) != len(issues):
             fields = []
+        # "Payment 2: …" only helps when the questions are about more than one payment.
+        several = len({i.leg for i in issues if i.leg is not None}) > 1
         question = (
             issue.question
             if len(issues) == 1
             else "\n".join(
-                f"Payment {i.leg + 1}: {i.question}" if i.leg is not None else i.question
+                f"Payment {i.leg + 1}: {i.question}"
+                if several and i.leg is not None
+                else i.question
                 for i in issues
             )
         )
+        extraction = state.get("checkpoint") or state.get("extraction")
         try:
             turn = self.d.gateway.propose_question(
                 state["conversation_id"],
                 question,
                 revision=state["revision"],
                 fields=fields,
-                extraction=state["extraction"].model_dump(mode="json") if fields else None,
+                # Saved with every question: a structured answer resumes from it, and the
+                # next run compares against it to notice a payment that was left out.
+                extraction=extraction.model_dump(mode="json") if extraction else None,
             )
         except GatewayError:
             return {"outcome": {"status": "error", "code": "QUESTION_FAILED"}}
