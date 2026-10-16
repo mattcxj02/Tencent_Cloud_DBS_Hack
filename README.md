@@ -192,22 +192,18 @@ Rogue Agent Mode (local only): `uv run python scripts/rogue_agent_demo.py` runs 
 
 ## Status (15 Oct 2026)
 
-Built: all four payment actions, bundles of 1–4 legs, clarifications (with clickable choices) and corrections, the independent validator, exact-payload passkey approval, hard policy, step-up, mandates, atomic execution, audit, Langfuse, voice through TRTC, live progress stages, the React UI and container isolation. The server side is covered by 1,380 pytest tests and by the live runs in [docs/evidence/](docs/evidence/README.md); extraction takes about 2 s at the median ([T-14-no-think](docs/evidence/T-14-no-think.md)). The React UI is type-checked and builds, with browser fixture pages in `web/tests/`. **Still pending:**
-- the multi-payment and step-up flows in a real browser (they ran live with a software passkey over the real HTTP API; one spoken payment has been run in Chrome with Touch ID: [UI-trace](docs/evidence/UI-trace.md));
-- any hosted deployment.
+**Built:** everything in the flow and security table above, plus the React UI and container isolation. Covered by 1,380 pytest tests and the live runs in [docs/evidence/](docs/evidence/README.md).
+
+**Not yet done:** multi-payment and step-up flows in a real browser (they ran live over the HTTP API with a software passkey; one spoken payment has run in Chrome with Touch ID, see [UI-trace](docs/evidence/UI-trace.md)), and any hosted deployment.
 
 ## Limitations
 
-- **Attack testing is finite.** 46 attacks held ([T-13](docs/evidence/T-13-attack-matrix.md)), but a valid citation does not prove meaning: "Mum lent me 500" can be drafted as 500, which the customer then sees and must reject. A reference the agent does not declare is not checked against the amount (the passkey and step-up still apply).
-- **Small evaluation.** 35 typed English cases, one to three trials per configuration, hand-made wrong drafts, measured on extractor prompt v2 (the current v3 adds one rule and has not been re-run). One held-out case (`adv-07`) informed a v2 rule. These numbers are not a security proof.
-- **Latency.** With reasoning off, extraction is about 2 s at the median (p95 about 3 s); with reasoning on (the default when `EXTRACT_REASONING_EFFORT` is unset) it was 9–11 s and up to 31 s. Voice-to-ready time has not been measured separately.
-- **Validator limits.** It occasionally runs out of output tokens on 4-leg drafts; this blocks the draft (fails closed).
-- **The confirmation is application UI,** not a browser-protected payment display, and passkey user verification may be a PIN.
-- **The audit chain is tamper-evident only** relative to retained history: no external checkpoints, and no protection against a privileged full rewrite.
-- **Scam rules are keyword heuristics,** with false positives and false negatives.
-- **Isolation.** Containers share one Docker host and kernel; `make dev` runs without isolation.
-- **Not measured:** time saved versus a standard app flow (no usability sessions were run), voice accuracy with real Singaporean speakers, and model cost.
-- Pausing the mandate stops this assistant only, not cards or other channels. A phone needs an HTTPS origin and re-enrollment. The Langfuse project is private; the [UI-trace](docs/evidence/UI-trace.md) screenshots show its traces.
+- **Small evaluation.** 35 typed English cases, 1–3 trials each, on extractor prompt v2 (v3 not re-run), plus 46 attacks. Good evidence, not a security proof.
+- **Citations prove words, not meaning.** "Mum lent me 500" can be drafted as a SGD 500 payment; the customer has to catch it at confirmation.
+- **Latency.** Extraction is about 2 s at the median with reasoning off, but 9–31 s with reasoning on (the default if `EXTRACT_REASONING_EFFORT` is unset).
+- **Validator** occasionally runs out of tokens on 4-leg drafts, which blocks them (fails closed).
+- **Prototype-grade controls.** Scam detection is keyword-based; the confirmation is app UI, not a browser-protected display; the audit chain has no external checkpoints; containers share one kernel, and `make dev` has no isolation.
+- **Not measured:** time saved versus a standard app flow, voice accuracy with Singaporean speakers, and model cost.
 
 ## How it was built
 
