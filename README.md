@@ -190,12 +190,6 @@ Rogue Agent Mode (local only): `uv run python scripts/rogue_agent_demo.py` runs 
 | [CODEBUDDY.md](CODEBUDDY.md) | Project rules and invariants given to the coding agents |
 | Folder READMEs | [gateway](gateway/README.md), [agent](agent/README.md), [validator](validator/README.md), [shared](shared/README.md), [ledger](ledger/README.md), [prompts](prompts/README.md), [web](web/README.md), [infra](infra/README.md), [evals](evals/README.md), [scripts](scripts/README.md), [tests](tests/README.md) |
 
-## Status (15 Oct 2026)
-
-**Built:** everything in the flow and security table above, plus the React UI and container isolation. Covered by 1,380 pytest tests and the live runs in [docs/evidence/](docs/evidence/README.md).
-
-**Not yet done:** multi-payment and step-up flows in a real browser (they ran live over the HTTP API with a software passkey; one spoken payment has run in Chrome with Touch ID, see [UI-trace](docs/evidence/UI-trace.md)), and any hosted deployment.
-
 ## Limitations
 
 - **Small evaluation.** 35 typed English cases, 1–3 trials each, on extractor prompt v2 (v3 not re-run), plus 46 attacks. Good evidence, not a security proof.
